@@ -36,20 +36,30 @@
 *.x86_64
 *.hex
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+# Keil MDK-ARM generated files
+MDK-ARM/**/*.htm
+MDK-ARM/**/*.sct
+MDK-ARM/**/*.crf
+MDK-ARM/**/*.i
+MDK-ARM/**/*.d
+MDK-ARM/**/*.o
+MDK-ARM/**/*.lnp
+MDK-ARM/**/*.dep
+MDK-ARM/**/*.htm
+MDK-ARM/**/*.iex
+MDK-ARM/**/*.axf
+MDK-ARM/**/*.hex
+MDK-ARM/**/*.bin
+MDK-ARM/**/*.map
+MDK-ARM/**/*.dbgconf
+MDK-ARM/**/*.scvd
+MDK-ARM/RTE/**
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# User-specific Keil files
+*.uvguix*
+*.uvoptx
+*.cprj
+*.txt
 
-# debug information files
-*.dwo
+# FreeRTOS demo files
+/FreeRTOS/Demo/
