@@ -36,30 +36,37 @@
 *.x86_64
 *.hex
 
-# Keil MDK-ARM generated files
-MDK-ARM/**/*.htm
-MDK-ARM/**/*.sct
-MDK-ARM/**/*.crf
-MDK-ARM/**/*.i
-MDK-ARM/**/*.d
-MDK-ARM/**/*.o
-MDK-ARM/**/*.lnp
-MDK-ARM/**/*.dep
-MDK-ARM/**/*.htm
-MDK-ARM/**/*.iex
-MDK-ARM/**/*.axf
-MDK-ARM/**/*.hex
-MDK-ARM/**/*.bin
-MDK-ARM/**/*.map
-MDK-ARM/**/*.dbgconf
-MDK-ARM/**/*.scvd
-MDK-ARM/RTE/**
+# Build outputs
+/Build/
 
 # User-specific Keil files
 *.uvguix*
 *.uvoptx
+*.uvopt
 *.cprj
-*.txt
+/Project/MDK-ARM/RTE/
+/Project/MDK-ARM/JLinkSettings.ini
+/Project/MDK-ARM/EventRecorderStub.scvd
 
 # FreeRTOS demo files
-/FreeRTOS/Demo/
+/ThirdParty/FreeRTOS/Demo/
+
+# Local configuration and secrets
+/App/Config/app_secrets.h
+/App/Config/wifi_credentials.h
+
+# Editor files
+.vscode/
+.vs/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and log files
+*~
+*.bak
+*.tmp
+*.log

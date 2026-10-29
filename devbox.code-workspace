@@ -52,6 +52,7 @@
             "**/core_armv8*": true,
             "**/ARM_CM7": true,
             "**/*ioc": true,
+            "**/*md": true,
 
             "**/FreeRTOS/Demo": true,
         },
@@ -96,6 +97,7 @@
             "**/core_armv8*": true,
             "**/ARM_CM7": true,
             "**/*ioc": true,
+            // "**/*md": true,
             
             "**/FreeRTOS/Demo": true,
         },
