@@ -1,1 +1,0 @@
-1、Projects与Build的区别：Projects存放需要提交到 Git 的工程配置，Build只存放编译产生的文件，Build应加入.gitignore
