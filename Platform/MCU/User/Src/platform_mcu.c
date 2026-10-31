@@ -18,7 +18,7 @@ HAL_StatusTypeDef platform_mcu_init(void)
     {
         return HAL_ERROR;
     }
-    // __HAL_UART_DISABLE(&huart1); // 禁用UART1，等待用户使用串口调试助手时使能
+    __HAL_UART_DISABLE(&huart1); // 禁用UART1，等待用户使用串口调试助手时使能
 
     return HAL_OK;
 }

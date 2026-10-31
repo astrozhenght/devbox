@@ -70,3 +70,5 @@ Desktop.ini
 *.bak
 *.tmp
 *.log
+Project/MDK-ARM/JLinkLog.txt
+Project/MDK-ARM/DebugConfig/project_STM32H743XIHx_1.1.0.dbgconf

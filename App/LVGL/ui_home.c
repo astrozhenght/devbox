@@ -62,6 +62,10 @@ static void ui_home_configure_layout(void);
 // 创建主页-状态栏
 static void ui_home_create_status_bar(lv_obj_t *parent)
 {
+    char time_str[6];
+    time_service_datetime_t datetime = {0};
+    time_service_get_datetime(&datetime); // 从RTC读取日期和时间
+
     home_context.system_status_bar = lv_obj_create(parent);
     lv_obj_set_style_pad_left(home_context.system_status_bar, 25, 0);
     lv_obj_set_style_pad_right(home_context.system_status_bar, 25, 0);
@@ -85,6 +89,9 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     home_context.status_bar_time_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_time_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_time_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    ui_home_format_time(time_str, datetime.hour, datetime.minute); // 格式化时间，例如: "23:09"
+    time_str[5] = '\0'; // 手动补上结束符
+    lv_label_set_text(home_context.status_bar_time_label, time_str); // 把读取到的RTC时间，刷新显示到主界面
 
     lv_obj_set_style_radius(home_context.system_status_bar, 0, 0);  // 设置圆角为0，变成矩形
     //static const lv_coord_t status_grid_cols[] = { LV_GRID_FR(20), LV_GRID_FR(20), LV_GRID_FR(86), LV_GRID_FR(12), LV_GRID_FR(12), LV_GRID_TEMPLATE_LAST };
@@ -101,6 +108,11 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
 // 创建主页-时间和天气面板
 static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
 {
+    char time_str[6];
+    char date_str[32];
+    time_service_datetime_t datetime = {0};
+    time_service_get_datetime(&datetime); // 从RTC读取日期和时间
+
     home_context.datetime_weather = lv_obj_create(parent);
     lv_obj_set_style_pad_left(home_context.datetime_weather, 25, 0);
     lv_obj_set_style_pad_right(home_context.datetime_weather, 25, 0);
@@ -109,7 +121,9 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     home_context.tw_time_label = lv_label_create(home_context.datetime_weather);
     lv_obj_set_style_text_font(home_context.tw_time_label, &ui_font_chinese_72_4, 0);
     lv_obj_set_style_text_color(home_context.tw_time_label, lv_palette_main(LV_PALETTE_BLUE), 0);
-    // lv_label_set_text(home_context.tw_time_label, time_str);
+    time_str[5] = 0; // 结束符
+    ui_home_format_time(time_str, datetime.hour, datetime.minute); // 格式化时间，例如: "23:09"
+    lv_label_set_text(home_context.tw_time_label, time_str);
 
     home_context.tw_weather_icon = lv_img_create(home_context.datetime_weather);
     lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(99U)); // 默认显示未知图标N/A
@@ -118,7 +132,8 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     home_context.tw_date_label = lv_label_create(home_context.datetime_weather);
     lv_obj_set_style_text_font(home_context.tw_date_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.tw_date_label, lv_palette_main(LV_PALETTE_BLUE), 0);
-    // lv_label_set_text(home_context.tw_date_label, date_str);
+    ui_home_format_date(date_str, datetime.month, datetime.day, datetime.weekday); // 格式化日期，例如："9月22日 周二"
+    lv_label_set_text(home_context.tw_date_label, date_str);
 
     home_context.tw_temperature_label = lv_label_create(home_context.datetime_weather);
     lv_obj_set_style_text_font(home_context.tw_temperature_label, &ui_font_chinese_24_4, 0);
@@ -379,11 +394,11 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
 static void ui_home_refresh_timer_cb(lv_timer_t* t)
 {
     LV_UNUSED(t);
-    static uint32_t last_time_year = 1970;  // 年
-    static uint8_t  last_time_month = 1;    // 月
-    static uint8_t  last_time_day = 1;      // 日
-    static uint8_t  last_time_hour = 0;     // 时
-    static uint8_t  last_time_minute = 0;   // 分
+    static uint32_t last_time_year   = 0xFF;  // 年
+    static uint8_t  last_time_month  = 0xFF;  // 月
+    static uint8_t  last_time_day    = 0xFF;  // 日
+    static uint8_t  last_time_hour   = 0xFF;  // 时
+    static uint8_t  last_time_minute = 0xFF;  // 分
     uint32_t text_len; // 天气字符串长度
     uint32_t temp_len; // 温度字符串长度
     uint8_t weather_str[64]; // 处理后的天气字符串，比如："小雨 16℃"

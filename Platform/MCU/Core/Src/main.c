@@ -1,207 +1,20 @@
-
 #include "main.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "FreeRTOS.h"
 #include "task.h"
-
 #include "lvgl.h"
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "ui_home.h"
-
 #include "bsp_types.h"
 #include "bsp_board.h"
-#include "bsp_rtc.h"
-#include "bsp_wifi.h"
 #include "sdram.h"
-
-#include "wifi_service_port.h"
-#include "wifi_credentials.h"
+#include "app_tasks.h"
 
 void SystemClock_Config(void);
 static void MPU_Config(void);
-
-/* TASK1 任务配置 */
-#define GPIO_TASK1_PRIO         3       // 任务优先级
-#define GPIO_TASK1_STACK_SIZE   1280    // 堆栈大小
-TaskHandle_t    gpio_task1_handler;     // 任务句柄
-void task1( void * pvParameters );      // 任务函数
-
-/* TASK2 任务配置 */
-#define GPIO_TASK2_PRIO         2       // 任务优先级
-#define GPIO_TASK2_STACK_SIZE   1280    // 堆栈大小
-TaskHandle_t    gpio_task2_handler;     // 任务句柄
-void task2( void * pvParameters );      // 任务函数
-
-/**
- * @brief UI任务入口函数
- *
- * 任务启动后依次执行以下操作：
- * 1. 请求Wi-Fi服务连接无线网络；
- * 2. RTC未初始化时，请求通过SNTP同步网络时间；
- * 3. 请求获取天气数据；
- * 4. 周期性调用LVGL任务处理函数，驱动界面刷新和事件处理。
- *
- * @param pvParameters 任务创建时传入的参数，当前未使用
- *
- * @note 本函数作为FreeRTOS任务运行，初始化完成后不会返回。
- * @note LVGL处理周期当前设置为10 ms。
- */
-static void prvGPIOTask01( void *pvParameters )
-{
-    if (wifi_service_enqueue_command(WIFI_SERVICE_CMD_CONNECT) == false)
-    {
-        while(1);
-    }
-
-    if (bsp_rtc_require_init())
-    {
-        if (wifi_service_enqueue_command(WIFI_SERVICE_CMD_GET_SNTPTIME) == false)
-        {
-            while(1);
-        }
-        bsp_rtc_mark_init();
-    }
-
-    if (wifi_service_enqueue_command(WIFI_SERVICE_CMD_GET_WEATHER) == false)
-    {
-        // printf("队列发送失败\r\n");
-        while(1);
-    }
-
-    for(;;)
-    {
-        // 定期调用 lv_task_handler()，用于处理与 lvgl 相关的任务
-        lv_task_handler();
-        vTaskDelay(pdMS_TO_TICKS(10)); // 延时10ms
-    }
-}
-
-// wireless_task
-// 功能包括：联网，获取网络天气，获取网络时间
-static void prvGPIOTask02( void *pvParameters )
-{
-    uint8_t wifi_command;
-    wifi_service_message_t wifi_message = {0};
-    wifi_message.status = WIFI_SERVICE_STATUS_OK;
-    uint8_t *p_wifi_rx_buffer = bsp_wifi_get_rx_buffer();
-
-    vTaskDelay(pdMS_TO_TICKS(500)); // ESP8266上电到打印AT固件版本需要220ms左右
-    bsp_wifi_start_receive();
-
-    while(1)
-    {
-        if (wifi_service_dequeue_command(&wifi_command))
-        {
-            wifi_message.status = WIFI_SERVICE_STATUS_OK;
-            wifi_message.command = (wifi_service_command_t)wifi_command;
-
-            switch (wifi_command)
-            {
-                case WIFI_SERVICE_CMD_CONNECT:
-                    wifi_message.command = WIFI_SERVICE_CMD_CONNECT;
-                    if ((bsp_wifi_execute_at_command((const uint8_t *)"AT\r\n", 100) != BSP_WIFI_OK)          || // 测试AT指令
-                        (bsp_wifi_execute_at_command((const uint8_t *)"AT+CWMODE=1\r\n", 100) != BSP_WIFI_OK) || // 设置当前Wi-Fi模式为Station模式
-                        (bsp_wifi_execute_at_command((const uint8_t *)"AT+CWJAP=\"" APP_WIFI_SSID "\",\"" APP_WIFI_PASSWORD "\"\r\n", 10000) != BSP_WIFI_OK)) // 连接wifi，预计4s连接成功
-                    {
-                        wifi_message.status = WIFI_SERVICE_STATUS_ERROR;
-                    }
-                    break;
-                case WIFI_SERVICE_CMD_GET_WEATHER:
-                    wifi_message.command = WIFI_SERVICE_CMD_GET_WEATHER;
-                    // 获取天气信息
-                    if ((bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPSTART=\"TCP\",\"api.seniverse.com\",80\r\n", 500) != BSP_WIFI_OK) || // 连接心知服务器，预计50ms连接成功
-                        (bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPMODE=1\r\n", 100) != BSP_WIFI_OK) || // 使能esp8266透传模式，透传模式自动重连tcp
-                        (bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPSEND\r\n", 100)   != BSP_WIFI_OK) || // 开启数据传输
-                        !weather_service_request_update((const uint8_t *)"GET https://api.seniverse.com/v3/weather/now.json?key=" APP_WEATHER_API_KEY "&location=jiangsu suzhou&language=zh-Hans&unit=c\r\n"))
-                    {
-                        wifi_message.status = WIFI_SERVICE_STATUS_ERROR;
-                        break;
-                    }
-                    // 把天气数据缓存下来
-                    uint32_t weather_len = strlen((const char *)p_wifi_rx_buffer) + 1;
-                    uint8_t *p_weather = (uint8_t *)malloc(weather_len);
-                    if (p_weather == NULL) // 分配失败
-                    {
-                        wifi_message.status = WIFI_SERVICE_STATUS_NO_MEMORY;
-                        break;
-                    }
-                    memcpy((void *)p_weather, (const void *)p_wifi_rx_buffer, weather_len);
-                    if ((bsp_wifi_exit_passthrough() != BSP_WIFI_OK) || // 退出透传模式失败
-                        (bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPCLOSE\r\n", 10) != BSP_WIFI_OK)) // 关闭tcp连接失败
-                    {
-                        free(p_weather);
-                        wifi_message.status = WIFI_SERVICE_STATUS_ERROR;
-                        break;
-                    }
-                    // 有效天气数据在本任务中提取，提取后发送给主任务
-                    if (!weather_service_parse_response(
-                        (const char *)p_weather,
-                        (weather_service_info_t *)&wifi_message))
-                    {
-                        wifi_message.status = WIFI_SERVICE_STATUS_WEATHER_PARSE_ERROR;
-                    }
-                    free(p_weather);
-                    break;
-                case WIFI_SERVICE_CMD_GET_SNTPTIME:
-                    wifi_message.command = WIFI_SERVICE_CMD_GET_SNTPTIME;
-                    //AT+CIPSNTPCFG=1,8 //设置时区，1ms接收完成
-                    //AT+CIPSNTPTIME?  //查询时间，5ms接收完成
-                    if ((bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPSNTPCFG=1,8\r\n", 10) != BSP_WIFI_OK)) // 设置时区，1ms接收完成
-                    {
-                        wifi_message.status = WIFI_SERVICE_STATUS_ERROR;
-                        break;
-                    }
-                    for (uint8_t i = 0; i < 10; i++)
-                    {
-                        if ((bsp_wifi_execute_at_command((const uint8_t *)"AT+CIPSNTPTIME?\r\n", 30) != BSP_WIFI_OK)) // 查询时间，5ms接收完成
-                        {
-                            wifi_message.status = WIFI_SERVICE_STATUS_ERROR;
-                            break;
-                        }
-                        // AT+CIPSNTPTIME?
-                        // +CIPSNTPTIME:Thu Dec 25 22:08:46 2025
-                        // OK
-                        // 把Thu Dec 25 22:08:46 2025，包含'\0'的话长度为25，通过队列发送出去
-                        p_wifi_rx_buffer[54] = 0; // 手动添加字符串结束符
-                        if (strcmp((const char *)(p_wifi_rx_buffer + 50), "1970")) // SNTP同步完成
-                        {
-                            memcpy(wifi_message.data.sntp_time, (const char *)(p_wifi_rx_buffer + 30), 25);
-                            wifi_message.status = WIFI_SERVICE_STATUS_OK;
-                            break;
-                        }
-                        else
-                        {
-                            wifi_message.status = WIFI_SERVICE_STATUS_INVALID_SNTP_TIME;
-                        }
-                        // 查询时间太早，SNTP还没同步完成，此时极容易返回 1970
-                        vTaskDelay(pdMS_TO_TICKS(1000)); // 延时1秒后重试
-                    }
-                    break;
-                default:
-                    wifi_message.command = WIFI_SERVICE_CMD_NONE;
-                    break;
-            }
-            if ((wifi_message.command == WIFI_SERVICE_CMD_CONNECT) ||
-                (wifi_message.command == WIFI_SERVICE_CMD_GET_WEATHER) ||
-                (wifi_message.command == WIFI_SERVICE_CMD_GET_SNTPTIME))
-            {
-                if (wifi_service_send_message(&wifi_message) == false)
-                {
-                    // printf("队列发送失败\r\n");
-                    while(1);
-                }
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
 
 /**
  * @brief  The application entry point.
@@ -223,7 +36,6 @@ int main(void)
     {
         Error_Handler();
     }
-    printf("SysClock: %d\n", HAL_RCC_GetSysClockFreq());
 
     lv_init();
     lv_port_disp_init();
@@ -232,41 +44,10 @@ int main(void)
     // 创建主界面
     ui_home_create(lv_scr_act());
 
-    printf("SysClock: %d\n", HAL_RCC_GetSysClockFreq());
-    printf("HCLK: %d\n", HAL_RCC_GetHCLKFreq());
-    printf("PCLK1: %d\n", HAL_RCC_GetPCLK1Freq());
-    printf("PCLK2: %d\n", HAL_RCC_GetPCLK2Freq());
-
-    PLL3_ClocksTypeDef PLL3_Clocks = {0};
-    HAL_RCCEx_GetPLL3ClockFreq(&PLL3_Clocks);
-    printf("PLL3_P: %d\n", PLL3_Clocks.PLL3_P_Frequency);
-    printf("PLL3_Q: %d\n", PLL3_Clocks.PLL3_Q_Frequency);
-    printf("PLL3_R: %d\n", PLL3_Clocks.PLL3_R_Frequency);
-
-    RCC_PeriphCLKInitTypeDef RCC_PeriphCLKInit = {0};
-    HAL_RCCEx_GetPeriphCLKConfig(&RCC_PeriphCLKInit);
-    /* FMC kernel clock source selection
-       00: rcc_hclk3 clock selected as kernel peripheral clock (default after reset)
-       01: pll1_q_ck clock selected as kernel peripheral clock
-       10: pll2_r_ck clock selected as kernel peripheral clock
-       11: per_ck clock selected as kernel peripheral clock
-    */
-    printf("FmcClockSelection: %d\n", RCC_PeriphCLKInit.FmcClockSelection);
-    printf("PLL3_M: %d\n", RCC_PeriphCLKInit.PLL3.PLL3M);
-    printf("PLL3_N: %d\n", RCC_PeriphCLKInit.PLL3.PLL3N);
-    printf("PLL3_P: %d\n", RCC_PeriphCLKInit.PLL3.PLL3P);
-    printf("PLL3_Q: %d\n", RCC_PeriphCLKInit.PLL3.PLL3Q);
-    printf("PLL3_R: %d\n", RCC_PeriphCLKInit.PLL3.PLL3R);
-
-    // 创建队列
-    if (!wifi_service_create_command_queue() ||
-        !wifi_service_create_message_queue())
+    if (!app_tasks_create())
     {
-        printf("create queue fail!\n");
+        Error_Handler();
     }
-
-    xTaskCreate(prvGPIOTask01, "gpio_task01", GPIO_TASK1_STACK_SIZE, NULL, GPIO_TASK1_PRIO, &gpio_task1_handler);
-    xTaskCreate(prvGPIOTask02, "gpio_task02", GPIO_TASK2_STACK_SIZE, NULL, GPIO_TASK2_PRIO, &gpio_task2_handler);
 
     /* Start scheduler */
     vTaskStartScheduler();

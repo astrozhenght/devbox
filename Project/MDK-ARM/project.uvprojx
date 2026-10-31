@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,USE_FULL_LL_DRIVER,STM32H743xx</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\App\Config;..\..\App\LVGL;..\..\App\LVGL\assets\fonts;..\..\App\LVGL\assets\images;..\..\App\Service;..\..\BSP\Inc;..\..\Common\Inc;..\..\Platform\MCU\Core\Inc;..\..\Platform\MCU\User\Inc;..\..\Platform\Port\FatFS;..\..\Platform\Port\FreeRTOS;..\..\Platform\Port\LVGL;..\..\ThirdParty\cJSON;..\..\ThirdParty\FatFS\source;..\..\ThirdParty\FreeRTOS\Source\include;..\..\ThirdParty\LVGL\src\core;..\..\ThirdParty\LVGL\src\draw;..\..\ThirdParty\LVGL\src\extra;..\..\ThirdParty\LVGL\src\font;..\..\ThirdParty\LVGL\src\hal;..\..\ThirdParty\LVGL\src\misc;..\..\ThirdParty\LVGL\src\widgets;..\..\ThirdParty\LVGL\src\;..\..\ThirdParty\LVGL\;..\..\ThirdParty\ST\CMSIS\Device\ST\STM32H7xx\Include;..\..\ThirdParty\ST\CMSIS\Include;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc\Legacy;..\..\ThirdParty\FreeRTOS\Source\portable\RVDS\ARM_CM4F</IncludePath>
+              <IncludePath>..\..\App\Config;..\..\App\LVGL;..\..\App\LVGL\assets\fonts;..\..\App\LVGL\assets\images;..\..\App\Service;..\..\App\Tasks;..\..\BSP\Inc;..\..\Common\Inc;..\..\Platform\MCU\Core\Inc;..\..\Platform\MCU\User\Inc;..\..\Platform\Port\FatFS;..\..\Platform\Port\FreeRTOS;..\..\Platform\Port\LVGL;..\..\ThirdParty\cJSON;..\..\ThirdParty\FatFS\source;..\..\ThirdParty\FreeRTOS\Source\include;..\..\ThirdParty\LVGL\src\core;..\..\ThirdParty\LVGL\src\draw;..\..\ThirdParty\LVGL\src\extra;..\..\ThirdParty\LVGL\src\font;..\..\ThirdParty\LVGL\src\hal;..\..\ThirdParty\LVGL\src\misc;..\..\ThirdParty\LVGL\src\widgets;..\..\ThirdParty\LVGL\src\;..\..\ThirdParty\LVGL\;..\..\ThirdParty\ST\CMSIS\Device\ST\STM32H7xx\Include;..\..\ThirdParty\ST\CMSIS\Include;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc\Legacy;..\..\ThirdParty\FreeRTOS\Source\portable\RVDS\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -728,6 +728,26 @@
               <FileName>wifi_service_stm32.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\wifi_service_stm32.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>App/Tasks</GroupName>
+          <Files>
+            <File>
+              <FileName>app_tasks.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Tasks\app_tasks.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Tasks\ui_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>wifi_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Tasks\wifi_task.c</FilePath>
             </File>
           </Files>
         </Group>
