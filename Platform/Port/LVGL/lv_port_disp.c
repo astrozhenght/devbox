@@ -12,7 +12,9 @@
 #include "lv_port_disp.h"
 #include <stdbool.h>  // bool
 #include <stdint.h>   // uint32_t
-#include "bsp_lcd.h"  // LCD尺寸、显存地址、bsp_lcd_copy_dma2d()
+#include <string.h>   // memset()
+#include "bsp_lcd.h"  // LCD尺寸和显存地址
+#include "ltdc.h"
 
 /*********************
  *      DEFINES
@@ -27,7 +29,14 @@
     #define MY_DISP_VER_RES    480
 #endif
 
-#define LV_VER_RES_MAX         MY_DISP_HOR_RES  // 通常设置为 MY_DISP_VER_RES 的相等值。
+#if LV_COLOR_DEPTH != 16
+    #error "The LTDC layer uses RGB565, so LV_COLOR_DEPTH must be 16."
+#endif
+
+#define DISPLAY_PIXEL_COUNT          ((uint32_t)MY_DISP_HOR_RES * MY_DISP_VER_RES)
+#define DISPLAY_FRAMEBUFFER_SIZE     (DISPLAY_PIXEL_COUNT * sizeof(lv_color_t))
+#define DISPLAY_FRAMEBUFFER_0_ADDR   ((uintptr_t)LCD_FRAMEBUFFER_BASE_ADDR)
+#define DISPLAY_FRAMEBUFFER_1_ADDR   (DISPLAY_FRAMEBUFFER_0_ADDR + DISPLAY_FRAMEBUFFER_SIZE)
 /**********************
  *      TYPEDEFS
  **********************/
@@ -44,12 +53,10 @@ static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_colo
 /**********************
  *  STATIC VARIABLES
  **********************/
-static lv_disp_draw_buf_t draw_buf_dsc_2;
-// static lv_color_t buf_2_1[MY_DISP_HOR_RES * MY_DISP_VER_RES / 5];// __attribute__((section(".ARM.__at_0x30000000")));   /*A buffer for 48 rows*/
-// static lv_color_t buf_2_2[MY_DISP_HOR_RES * MY_DISP_VER_RES / 5] __attribute__((section(".ARM.__at_0x30000000")));   /*An other buffer for 48 rows*/
-// 数组大小：800*480*2B/5 = 150KB
-static lv_color_t buf_2_1[MY_DISP_HOR_RES * MY_DISP_VER_RES / 5] __attribute__((section(".axisram")));   /*A buffer for 48 rows*/
-static lv_color_t buf_2_2[MY_DISP_HOR_RES * MY_DISP_VER_RES / 5] __attribute__((section(".sram123")));   /*An other buffer for 48 rows*/
+static lv_disp_draw_buf_t display_draw_buffer;
+static lv_color_t * const framebuffer_0 = (lv_color_t *)DISPLAY_FRAMEBUFFER_0_ADDR;
+static lv_color_t * const framebuffer_1 = (lv_color_t *)DISPLAY_FRAMEBUFFER_1_ADDR;
+static lv_disp_drv_t * volatile pending_flush_driver;
 
 /**********************
  *      MACROS
@@ -66,48 +73,15 @@ void lv_port_disp_init(void)
      * -----------------------*/
     disp_init();
 
-    /*-----------------------------
-     * Create a buffer for drawing
-     *----------------------------*/
+    /* direct mode 要求两块显存初始内容一致，后续由 LVGL 同步差异区域。 */
+    memset(framebuffer_0, 0, DISPLAY_FRAMEBUFFER_SIZE);
+    memset(framebuffer_1, 0, DISPLAY_FRAMEBUFFER_SIZE);
 
-    /**
-     * LVGL requires a buffer where it internally draws the widgets.
-     * Later this buffer will passed to your display driver's `flush_cb` to copy its content to your display.
-     * The buffer has to be greater than 1 display row
-     *
-     * There are 3 buffering configurations:
-     * 1. Create ONE buffer:
-     *      LVGL will draw the display's content here and writes it to your display
-     *
-     * 2. Create TWO buffer:
-     *      LVGL will draw the display's content to a buffer and writes it your display.
-     *      You should use DMA to write the buffer's content to the display.
-     *      It will enable LVGL to draw the next part of the screen to the other buffer while
-     *      the data is being sent form the first buffer. It makes rendering and flushing parallel.
-     *
-     * 3. Double buffering
-     *      Set 2 screens sized buffers and set disp_drv.full_refresh = 1.
-     *      This way LVGL will always provide the whole rendered screen in `flush_cb`
-     *      and you only need to change the frame buffer's address.
-     */
-
-    // /* Example for 1) */
-    // static lv_disp_draw_buf_t draw_buf_dsc_1;
-    // static lv_color_t buf_1[MY_DISP_HOR_RES * 48];                          /*A buffer for 10 rows*/
-    // lv_disp_draw_buf_init(&draw_buf_dsc_1, buf_1, NULL, MY_DISP_HOR_RES * 48);   /*Initialize the display buffer*/
-
-    /* Example for 2) */
-    // static lv_disp_draw_buf_t draw_buf_dsc_2;
-    // static lv_color_t buf_2_1[MY_DISP_HOR_RES * MY_DISP_VER_RES / 10];    /*A buffer for 48 rows*/
-    // static lv_color_t buf_2_2[MY_DISP_HOR_RES * MY_DISP_VER_RES / 10];    /*An other buffer for 48 rows*/
-    lv_disp_draw_buf_init(&draw_buf_dsc_2, buf_2_1, buf_2_2, MY_DISP_HOR_RES * MY_DISP_VER_RES / 5);   /*Initialize the display buffer*/
-
-    /* Example for 3) also set disp_drv.full_refresh = 1 below*/
-    // static lv_disp_draw_buf_t draw_buf_dsc_3;
-    // static lv_color_t buf_3_1[MY_DISP_HOR_RES * MY_DISP_VER_RES];            /*A screen sized buffer*/
-    // static lv_color_t buf_3_2[MY_DISP_HOR_RES * MY_DISP_VER_RES];            /*Another screen sized buffer*/
-    // lv_disp_draw_buf_init(&draw_buf_dsc_3, buf_3_1, buf_3_2,
-    //                       MY_DISP_VER_RES * LV_VER_RES_MAX);   /*Initialize the display buffer*/
+    /* LTDC 初始显示 framebuffer_0，因此 LVGL 先在 framebuffer_1 中绘制。 */
+    lv_disp_draw_buf_init(&display_draw_buffer,
+                          framebuffer_1,
+                          framebuffer_0,
+                          DISPLAY_PIXEL_COUNT);
 
     /*-----------------------------------
      * Register the display in LVGL
@@ -126,13 +100,14 @@ void lv_port_disp_init(void)
     disp_drv.flush_cb = disp_flush;
 
     /*Set a display buffer*/
-    disp_drv.draw_buf = &draw_buf_dsc_2;
+    disp_drv.draw_buf = &display_draw_buffer;
 
     // disp_drv.rotated = LV_DISP_ROT_90;
     // disp_drv.sw_rotate = 1;
 
-    /*Required for Example 3)*/
-    // disp_drv.full_refresh = 1;
+    /* 整帧双缓冲 direct mode：只绘制变化区域，最后在垂直消隐期间切换显存。 */
+    disp_drv.full_refresh = 0;
+    disp_drv.direct_mode = 1;
 
     /* Fill a memory array with a color if you have GPU.
      * Note that, in lv_conf.h you can enable GPUs that has built-in support in LVGL.
@@ -174,33 +149,50 @@ void disp_disable_update(void)
  *'lv_disp_flush_ready()' has to be called when finished.*/
 static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p)
 {
-    if (disp_flush_enabled) {
-        /*The most simple case (but also the slowest) to put all pixels to the screen one-by-one*/
-        // int32_t x;
-        // int32_t y;
-        // for(y = area->y1; y <= area->y2; y++) {
-        //     for(x = area->x1; x <= area->x2; x++) {
-        //         /*Put a pixel to the display. For example:*/
-        //         /*put_px(x, y, *color_p)*/
-        //         *(__IO uint16_t *)(LCD_FRAMEBUFFER_BASE_ADDR + 2 * (x + y * LCD_WIDTH)) = (uint16_t)(color_p->full);
-        //         // LCD_DrawPoint(x, y, *color_p);
-        //         color_p++;
-        //     }
-        // }
+    (void)area;
 
-        uint32_t xSize = area->x2 - area->x1 + 1;
-        uint32_t ySize = area->y2 - area->y1 + 1;
-        bsp_lcd_copy_dma2d((void *)color_p,
-                           (void *)(LCD_FRAMEBUFFER_BASE_ADDR + LV_COLOR_DEPTH / 8 * (LCD_WIDTH * area->y1 + area->x1)),
-                           xSize,
-                           ySize,
-                           0,
-                           LCD_WIDTH - xSize);
+    if (!disp_flush_enabled)
+    {
+        lv_disp_flush_ready(disp_drv);
+        return;
     }
 
-    /*IMPORTANT!!!
-     *Inform the graphics library that you are ready with the flushing*/
-    // lv_disp_flush_ready(disp_drv);
+    /* direct mode 可能一次刷新多个无效区域，只在最后一个区域完成后换帧。 */
+    if (!lv_disp_flush_is_last(disp_drv))
+    {
+        lv_disp_flush_ready(disp_drv);
+        return;
+    }
+
+    pending_flush_driver = disp_drv;
+    __DSB(); // 确保当前帧的显存写入在提交给 LTDC 前完成
+
+    /* 只更新 LTDC 影子寄存器，等待下一次垂直消隐再生效。 */
+    if ((HAL_LTDC_SetAddress_NoReload(&hltdc, (uint32_t)color_p, LTDC_LAYER_1) != HAL_OK) ||
+        (HAL_LTDC_Reload(&hltdc, LTDC_RELOAD_VERTICAL_BLANKING) != HAL_OK))
+    {
+        pending_flush_driver = NULL;
+        lv_disp_flush_ready(disp_drv);
+    }
+}
+
+/* LTDC 在垂直消隐期间完成显存切换后，通知 LVGL 旧显存可以继续绘制。 */
+void HAL_LTDC_ReloadEventCallback(LTDC_HandleTypeDef *ltdc_handle)
+{
+    lv_disp_drv_t *completed_driver;
+
+    if (ltdc_handle != &hltdc)
+    {
+        return;
+    }
+
+    completed_driver = pending_flush_driver;
+    pending_flush_driver = NULL;
+
+    if (completed_driver != NULL)
+    {
+        lv_disp_flush_ready(completed_driver);
+    }
 }
 
 /*OPTIONAL: GPU INTERFACE*/

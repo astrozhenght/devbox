@@ -32,8 +32,7 @@
 #include "uart_service.h"
 #include "bsp_wifi.h"
 #include "lvgl.h"
-#include "lv_gc.h"
-#include "lv_ll.h"
+#include "ltdc.h"
 
 /* USER CODE END Includes */
 
@@ -345,15 +344,17 @@ void USART6_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 
+void LTDC_IRQHandler(void)
+{
+    HAL_LTDC_IRQHandler(&hltdc);
+}
+
 void DMA2D_IRQHandler(void)
 {
     if ((DMA2D->ISR & DMA2D_FLAG_TC) != 0U) // 标志位
     {
         /* Clear the transfer complete flag */
         DMA2D->IFCR = DMA2D_FLAG_TC;
-        
-        lv_disp_t * disp = _lv_ll_get_head(&LV_GC_ROOT(_lv_disp_ll));
-        lv_disp_flush_ready(disp->driver);
     }
 }
 

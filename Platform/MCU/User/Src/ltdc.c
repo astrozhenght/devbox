@@ -1,4 +1,5 @@
 #include "ltdc.h"
+#include "platform_irq_priority.h"
 
 LTDC_HandleTypeDef hltdc; // LTDC句柄
 
@@ -11,6 +12,11 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef *hltdc)
     {
         /* Peripheral clock enable */
         __HAL_RCC_LTDC_CLK_ENABLE(); // 使能LTDC时钟
+
+        HAL_NVIC_SetPriority(LTDC_IRQn,
+                             PLATFORM_IRQ_LTDC_PREEMPT_PRIORITY,
+                             PLATFORM_IRQ_LTDC_SUB_PRIORITY);
+        HAL_NVIC_EnableIRQ(LTDC_IRQn);
 
         /* GPIO Ports Clock Enable */
         __HAL_RCC_GPIOG_CLK_ENABLE();

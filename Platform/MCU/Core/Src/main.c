@@ -23,7 +23,7 @@ static void MPU_Config(void);
 int main(void)
 {
     MPU_Config();
-    // SCB_EnableICache();
+    SCB_EnableICache();
     // SCB_EnableDCache();
 
     /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
