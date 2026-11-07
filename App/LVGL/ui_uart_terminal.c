@@ -25,8 +25,7 @@ typedef struct
     lv_obj_t* bottom_status_bar;             // 二级底部状态栏
     lv_obj_t* control_panel;                 // 二级控制面板
     lv_obj_t* title_bar_title_label;         // 三级
-    lv_obj_t* title_bar_minimize_btn;        // 三级
-    lv_obj_t* title_bar_close_btn;           // 三级
+    lv_obj_t* title_bar_home_btn;            // 三级：返回主页按钮
     lv_obj_t* bottom_hex_send_checkbox;      // 三级
     lv_obj_t* bottom_send_new_line_checkbox; // 三级
     lv_obj_t* bottom_rx_label;               // 三级
@@ -396,16 +395,12 @@ static void btn_event_cb(lv_event_t* e)
         lv_label_set_text(uart_context.bottom_tx_label, "S:0");
         lv_textarea_set_text(uart_context.send_area, ""); // 清除显示
     }
-    if (btn == uart_context.title_bar_close_btn)
+    if (btn == uart_context.title_bar_home_btn)
     {
         uart_service_port_close(); // 关闭UART
         s_uart_connect_status = UI_UART_DISCONNECTED;
         // lv_timer_del(uart_context.uart_rx_timer); // 关闭窗口时删除定时器会导致页面卡死
         lv_obj_del(uart_context.container);
-    }
-    if (btn == uart_context.title_bar_minimize_btn)
-    {
-        // @todo
     }
 }
 
@@ -423,14 +418,15 @@ static void ui_uart_terminal_create_title_bar(void)
     lv_obj_t *label;
 
     uart_context.title_bar = lv_obj_create(uart_context.container);
-    lv_obj_set_style_pad_gap(uart_context.title_bar, 0, 0);   // 去掉容器与子项的外边距
-    //lv_obj_set_style_pad_all(uart_context.title_bar, 0, 0); // 一次性设置top/bottom/left/right四个方向为内边距为0
-    lv_obj_set_style_pad_right(uart_context.title_bar, 0, 0);
+    lv_obj_set_style_pad_all(uart_context.title_bar, 0, 0);
+    lv_obj_set_style_pad_gap(uart_context.title_bar, 0, 0);
+    lv_obj_set_style_pad_right(uart_context.title_bar, 8, 0);
     lv_obj_set_style_pad_left(uart_context.title_bar, 25, 0);
+    lv_obj_set_style_border_width(uart_context.title_bar, 0, 0);
     lv_obj_clear_flag(uart_context.title_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(uart_context.title_bar, 0, 0);  // 设置圆角为0，变成矩形
-    static const lv_coord_t top_grid_cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
-    static const lv_coord_t top_grid_rows[] = { LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+    static const lv_coord_t top_grid_cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+    static const lv_coord_t top_grid_rows[] = { LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
     lv_obj_set_grid_dsc_array(uart_context.title_bar, top_grid_cols, top_grid_rows);
     lv_obj_set_style_grid_row_align(uart_context.title_bar, LV_GRID_ALIGN_SPACE_BETWEEN, 0); // 均匀分布，首尾元素贴边，剩余空间在元素之间
 
@@ -439,36 +435,27 @@ static void ui_uart_terminal_create_title_bar(void)
     lv_obj_set_style_text_color(uart_context.title_bar_title_label, lv_palette_main(LV_PALETTE_PINK), 0);
     lv_label_set_text(uart_context.title_bar_title_label, "串口调试助手");
 
-    uart_context.title_bar_minimize_btn = lv_btn_create(uart_context.title_bar);
-    lv_obj_set_style_bg_opa(uart_context.title_bar_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);      // 背景透明
-    lv_obj_set_style_border_opa(uart_context.title_bar_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 边框透明
-    lv_obj_set_style_shadow_opa(uart_context.title_bar_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 阴影透明
-    lv_obj_set_style_radius(uart_context.title_bar_minimize_btn, 0, LV_PART_MAIN);                  // 直角
-    lv_obj_set_style_bg_opa(uart_context.title_bar_minimize_btn, LV_OPA_COVER, LV_STATE_PRESSED);   // 设置按下状态：灰色背景
-    lv_obj_set_style_bg_color(uart_context.title_bar_minimize_btn, lv_color_hex(0xAAAAAA), LV_STATE_PRESSED);
-    label = lv_label_create(uart_context.title_bar_minimize_btn);
-    lv_obj_set_style_text_color(label, lv_color_hex(0), 0); // 黑色字体颜色
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
-    lv_label_set_text(label, LV_SYMBOL_MINUS);
-    lv_obj_center(label);
-
-    uart_context.title_bar_close_btn = lv_btn_create(uart_context.title_bar);
-    lv_obj_set_style_bg_opa(uart_context.title_bar_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);      // 背景透明
-    lv_obj_set_style_border_opa(uart_context.title_bar_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 边框透明
-    lv_obj_set_style_shadow_opa(uart_context.title_bar_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 阴影透明
-    lv_obj_set_style_radius(uart_context.title_bar_close_btn, 0, LV_PART_MAIN);                  // 直角
-    lv_obj_set_style_bg_opa(uart_context.title_bar_close_btn, LV_OPA_COVER, LV_STATE_PRESSED);   // 设置按下状态：红色背景
-    lv_obj_set_style_bg_color(uart_context.title_bar_close_btn, lv_color_hex(0xFF0000), LV_STATE_PRESSED);
-    lv_obj_add_event_cb(uart_context.title_bar_close_btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
-    label = lv_label_create(uart_context.title_bar_close_btn);
-    lv_obj_set_style_text_color(label, lv_color_hex(0), 0); // 黑色字体颜色
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
-    lv_label_set_text(label, LV_SYMBOL_CLOSE);
+    /* 与文件管理器一致：白底细边框、圆角、24px文字，按下时红底白字。 */
+    uart_context.title_bar_home_btn = lv_btn_create(uart_context.title_bar);
+    lv_obj_remove_style_all(uart_context.title_bar_home_btn);
+    lv_obj_set_size(uart_context.title_bar_home_btn, 112, 38);
+    lv_obj_set_style_pad_all(uart_context.title_bar_home_btn, 3, 0);
+    lv_obj_set_style_radius(uart_context.title_bar_home_btn, 6, 0);
+    lv_obj_set_style_border_width(uart_context.title_bar_home_btn, 1, 0);
+    lv_obj_set_style_border_color(uart_context.title_bar_home_btn, lv_color_hex(0xE4EAF1), 0);
+    lv_obj_set_style_bg_opa(uart_context.title_bar_home_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(uart_context.title_bar_home_btn, lv_color_white(), 0);
+    lv_obj_set_style_text_color(uart_context.title_bar_home_btn, lv_color_hex(0x243247), 0);
+    lv_obj_set_style_text_font(uart_context.title_bar_home_btn, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_bg_color(uart_context.title_bar_home_btn, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(uart_context.title_bar_home_btn, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(uart_context.title_bar_home_btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
+    label = lv_label_create(uart_context.title_bar_home_btn);
+    lv_label_set_text(label, "返回主页");
     lv_obj_center(label);
 
     lv_obj_set_grid_cell(uart_context.title_bar_title_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(uart_context.title_bar_minimize_btn, LV_GRID_ALIGN_END, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(uart_context.title_bar_close_btn, LV_GRID_ALIGN_END, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(uart_context.title_bar_home_btn, LV_GRID_ALIGN_END, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 }
 
 static void ui_uart_terminal_create_control_panel(void)

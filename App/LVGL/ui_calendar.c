@@ -8,8 +8,7 @@ typedef struct
     lv_obj_t* header;              // 二级标题栏
     lv_obj_t* calendar;            // 二级日历
     lv_obj_t* header_title_label;  // 三级标题栏-标题
-    lv_obj_t* header_minimize_btn; // 三级标题栏-最小化按钮
-    lv_obj_t* header_close_btn;    // 三级标题栏-关闭按钮
+    lv_obj_t* header_home_btn;     // 三级标题栏-返回主页按钮
 } ui_calendar_context_t;
 
 static ui_calendar_context_t calendar_context = {0};
@@ -22,7 +21,7 @@ static void ui_calendar_btn_event_cb(lv_event_t* e)
 {
     lv_obj_t* btn = lv_event_get_target(e);
 
-    if (btn == calendar_context.header_close_btn)
+    if (btn == calendar_context.header_home_btn)
     {
         lv_obj_del(calendar_context.container);
         memset(&calendar_context, 0, sizeof(calendar_context));
@@ -42,52 +41,42 @@ static void calendar_create_container(lv_obj_t* parent)
 static void calendar_create_title_bar(void)
 {
     calendar_context.header = lv_obj_create(calendar_context.container);
-    lv_obj_set_style_pad_gap(calendar_context.header, 0, 0);   // 去掉容器与子项的外边距
-    //lv_obj_set_style_pad_all(calendar_context.header, 0, 0); // 一次性设置top/bottom/left/right四个方向为内边距为0
-    lv_obj_set_style_pad_right(calendar_context.header, 0, 0);
+    lv_obj_set_style_pad_all(calendar_context.header, 0, 0);
+    lv_obj_set_style_pad_gap(calendar_context.header, 0, 0);
+    lv_obj_set_style_pad_right(calendar_context.header, 8, 0);
     lv_obj_set_style_pad_left(calendar_context.header, 25, 0);
+    lv_obj_set_style_border_width(calendar_context.header, 0, 0);
     lv_obj_clear_flag(calendar_context.header, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(calendar_context.header, 0, 0);  // 设置圆角为0，变成矩形
-    static const lv_coord_t top_grid_cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
-    static const lv_coord_t top_grid_rows[] = { LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+    static const lv_coord_t top_grid_cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+    static const lv_coord_t top_grid_rows[] = { LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
     lv_obj_set_grid_dsc_array(calendar_context.header, top_grid_cols, top_grid_rows);
     lv_obj_set_style_grid_row_align(calendar_context.header, LV_GRID_ALIGN_SPACE_BETWEEN, 0); // 均匀分布，首尾元素贴边，剩余空间在元素之间
     calendar_context.header_title_label = lv_label_create(calendar_context.header);
     lv_obj_set_style_text_font(calendar_context.header_title_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(calendar_context.header_title_label, lv_palette_main(LV_PALETTE_PINK), 0);
     lv_label_set_text(calendar_context.header_title_label, "日历");
-    //lv_obj_set_height(calendar_context.header, 50);
-
-    calendar_context.header_minimize_btn = lv_btn_create(calendar_context.header);
-    lv_obj_set_style_bg_opa(calendar_context.header_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);      // 背景透明
-    lv_obj_set_style_border_opa(calendar_context.header_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 边框透明
-    lv_obj_set_style_shadow_opa(calendar_context.header_minimize_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 阴影透明
-    lv_obj_set_style_radius(calendar_context.header_minimize_btn, 0, LV_PART_MAIN);                  // 直角
-    lv_obj_set_style_bg_opa(calendar_context.header_minimize_btn, LV_OPA_COVER, LV_STATE_PRESSED);   // 设置按下状态：灰色背景
-    lv_obj_set_style_bg_color(calendar_context.header_minimize_btn, lv_color_hex(0xAAAAAA), LV_STATE_PRESSED);
-    lv_obj_t *label = lv_label_create(calendar_context.header_minimize_btn);
-    lv_obj_set_style_text_color(label, lv_color_hex(0), 0); // 黑色字体颜色
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
-    lv_label_set_text(label, LV_SYMBOL_MINUS);
-    lv_obj_center(label);
-
-    calendar_context.header_close_btn = lv_btn_create(calendar_context.header);
-    lv_obj_set_style_bg_opa(calendar_context.header_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);      // 背景透明
-    lv_obj_set_style_border_opa(calendar_context.header_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 边框透明
-    lv_obj_set_style_shadow_opa(calendar_context.header_close_btn, LV_OPA_TRANSP, LV_PART_MAIN);  // 阴影透明
-    lv_obj_set_style_radius(calendar_context.header_close_btn, 0, LV_PART_MAIN);                  // 直角
-    lv_obj_set_style_bg_opa(calendar_context.header_close_btn, LV_OPA_COVER, LV_STATE_PRESSED);   // 设置按下状态：红色背景
-    lv_obj_set_style_bg_color(calendar_context.header_close_btn, lv_color_hex(0xFF0000), LV_STATE_PRESSED);
-    lv_obj_add_event_cb(calendar_context.header_close_btn, ui_calendar_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    label = lv_label_create(calendar_context.header_close_btn);
-    lv_obj_set_style_text_color(label, lv_color_hex(0), 0); // 黑色字体颜色
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
-    lv_label_set_text(label, LV_SYMBOL_CLOSE);
+    /* 与文件管理器及串口调试助手统一：白底细边框，按下时红底白字。 */
+    calendar_context.header_home_btn = lv_btn_create(calendar_context.header);
+    lv_obj_remove_style_all(calendar_context.header_home_btn);
+    lv_obj_set_size(calendar_context.header_home_btn, 112, 38);
+    lv_obj_set_style_pad_all(calendar_context.header_home_btn, 3, 0);
+    lv_obj_set_style_radius(calendar_context.header_home_btn, 6, 0);
+    lv_obj_set_style_border_width(calendar_context.header_home_btn, 1, 0);
+    lv_obj_set_style_border_color(calendar_context.header_home_btn, lv_color_hex(0xE4EAF1), 0);
+    lv_obj_set_style_bg_opa(calendar_context.header_home_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(calendar_context.header_home_btn, lv_color_white(), 0);
+    lv_obj_set_style_text_color(calendar_context.header_home_btn, lv_color_hex(0x243247), 0);
+    lv_obj_set_style_text_font(calendar_context.header_home_btn, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_bg_color(calendar_context.header_home_btn, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(calendar_context.header_home_btn, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(calendar_context.header_home_btn, ui_calendar_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *label = lv_label_create(calendar_context.header_home_btn);
+    lv_label_set_text(label, "返回主页");
     lv_obj_center(label);
 
     lv_obj_set_grid_cell(calendar_context.header_title_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(calendar_context.header_minimize_btn, LV_GRID_ALIGN_END, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(calendar_context.header_close_btn, LV_GRID_ALIGN_END, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(calendar_context.header_home_btn, LV_GRID_ALIGN_END, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 }
 
 // 创建日历App-日历主体
