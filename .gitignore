@@ -39,6 +39,13 @@
 # Build outputs
 /Build/
 
+# Local tests
+/Tests/
+
+# Documentation: keep only the architecture document
+/Docs/*
+!/Docs/PROJECT_ARCHITECTURE_V2.1.md
+
 # User-specific Keil files
 *.uvguix*
 *.uvoptx

@@ -140,7 +140,8 @@ HAL_StatusTypeDef platform_sd_init(uint32_t Instance)
         {
             // SDMMC Default Speed Frequency (25Mhz max) for Peripheral CLK 200MHz
             // SDMMC High Speed Frequency (50Mhz max) for Peripheral CLK 200MHz
-            hsd_sdmmc[0].Init.ClockDiv = SDMMC_HSpeed_CLK_DIV;  // 200 / (2 * 2) = 50MHz
+            hsd_sdmmc[0].Init.ClockDiv = SDMMC_HSpeed_CLK_DIV; // 200 / (2 * 2) = 50MHz
+            // hsd_sdmmc[0].Init.ClockDiv = SDMMC_NSpeed_CLK_DIV; // 默认速度模式不超过25MHz
         }
 
         /* HAL SD initialization   */

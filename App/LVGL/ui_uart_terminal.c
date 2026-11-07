@@ -8,9 +8,9 @@
 
 // 对应UI界面的内容
 static uint32_t s_tx_total_bytes = 0;       // 对应底部状态栏Label-发送数据个数，无中断调用，不需要临界区保护
-static uint8_t s_tx_buffer[UART_APP_TX_BUFFER_SIZE]; // 存储发送区内容；无中断调用，不需要临界区保护
-static uint8_t s_rx_display_buffer[RING_BUFFER_SIZE];  // 存储接收区显示的内容；无中断调用，不需要临界区保护
-ui_uart_format_t s_send_format = UI_UART_FORMAT_TEXT;  // 对应复选框-16进制发送；无中断调用，不需要临界区保护
+static uint8_t s_tx_buffer[UART_APP_TX_BUFFER_SIZE];  // 存储发送区内容；无中断调用，不需要临界区保护
+static uint8_t s_rx_display_buffer[RING_BUFFER_SIZE]; // 存储接收区显示的内容；无中断调用，不需要临界区保护
+ui_uart_format_t s_send_format = UI_UART_FORMAT_TEXT; // 对应复选框-16进制发送；无中断调用，不需要临界区保护
 ui_uart_format_t s_rx_display_format = UI_UART_FORMAT_TEXT; // 对应复选框-16进制显示；无中断调用，不需要临界区保护
 uart_service_config_t s_uart_config = {115200, UART_SERVICE_DATA_BITS_8, UART_SERVICE_STOP_BITS_1, UART_SERVICE_PARITY_NONE};
 ui_uart_line_ending_t s_send_line_ending = UI_UART_LINE_ENDING_NONE;   // 对应复选框-发送新行；无中断调用，不需要临界区保护

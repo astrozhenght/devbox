@@ -3,6 +3,7 @@
 #include "wifi_service_port.h"
 #include "ui_calendar.h"
 #include "ui_uart_terminal.h"
+#include "ui_file_manager.h"
 #include "ui_images.h"
 #include "ui_fonts.h"
 
@@ -383,6 +384,10 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     if ((target == home_context.app_items[APP_UART_TERMINAL].button) || (target == home_context.app_items[APP_UART_TERMINAL].button_icon)) // 打开串口调试助手
     {
         ui_uart_terminal_create(lv_scr_act());
+    }
+    else if ((target == home_context.app_items[APP_FILE_MANAGER].button) || (target == home_context.app_items[APP_FILE_MANAGER].button_icon))
+    {
+        ui_file_manager_create(lv_scr_act());
     }
     else if ((target == home_context.app_items[APP_CALENDAR].button) || (target == home_context.app_items[APP_CALENDAR].button_icon)) // 打开日历
     {

@@ -60,6 +60,8 @@ typedef struct
 
 }Disk_drvTypeDef;
 
+extern Disk_drvTypeDef disk;
+
 /* Exported constants --------------------------------------------------------*/
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */

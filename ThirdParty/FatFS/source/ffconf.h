@@ -2,7 +2,7 @@
 /  Configurations of FatFs Module
 /---------------------------------------------------------------------------*/
 
-#define FFCONF_DEF	5380	/* Revision ID */
+#define FFCONF_DEF	80386	/* FatFs R0.16 Revision ID */
 
 /*---------------------------------------------------------------------------/
 / Function Configurations
@@ -144,7 +144,7 @@
 /  When LFN is not enabled, this option has no effect. */
 
 
-#define FF_LFN_BUF		255
+#define FF_LFN_BUF		765 /* UTF-8: up to 3 bytes per UTF-16 code unit */
 #define FF_SFN_BUF		12
 /* This set of options defines size of file name members in the FILINFO structure
 /  which is used to read out directory items. These values should be suffcient for
@@ -153,6 +153,7 @@
 
 
 #define FF_FS_RPATH		2
+#define FF_PATH_DEPTH    16
 /* This option configures support for relative path.
 /
 /   0: Disable relative path and remove related API functions.
@@ -237,6 +238,7 @@
 
 
 #define FF_FS_NORTC		0
+#define FF_FS_CRTIME     1 /* Return actual directory/file creation timestamps. */
 #define FF_NORTC_MON	11
 #define FF_NORTC_MDAY	1
 #define FF_NORTC_YEAR	2024

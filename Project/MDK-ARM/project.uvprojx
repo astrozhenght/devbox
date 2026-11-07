@@ -385,6 +385,11 @@
           <GroupName>App/LVGL</GroupName>
           <Files>
             <File>
+              <FileName>ui_file_manager.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\ui_file_manager.c</FilePath>
+            </File>
+            <File>
               <FileName>ui_home.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\ui_home.c</FilePath>
@@ -715,6 +720,16 @@
           <GroupName>App/Service</GroupName>
           <Files>
             <File>
+              <FileName>file_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\file_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>file_service_fatfs.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\file_service_fatfs.c</FilePath>
+            </File>
+            <File>
               <FileName>uart_service.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\uart_service.c</FilePath>
@@ -734,6 +749,11 @@
         <Group>
           <GroupName>App/Tasks</GroupName>
           <Files>
+            <File>
+              <FileName>file_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Tasks\file_task.c</FilePath>
+            </File>
             <File>
               <FileName>app_tasks.c</FileName>
               <FileType>1</FileType>
@@ -939,6 +959,11 @@
         <Group>
           <GroupName>Platform/Port/FatFS</GroupName>
           <Files>
+            <File>
+              <FileName>fatfs_memory.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\Port\FatFS\fatfs_memory.c</FilePath>
+            </File>
             <File>
               <FileName>diskio.c</FileName>
               <FileType>1</FileType>
@@ -2248,11 +2273,6 @@
               <FileName>ff.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\ThirdParty\FatFS\source\ff.c</FilePath>
-            </File>
-            <File>
-              <FileName>ffsystem.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\ThirdParty\FatFS\source\ffsystem.c</FilePath>
             </File>
             <File>
               <FileName>ffunicode.c</FileName>

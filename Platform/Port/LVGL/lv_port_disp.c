@@ -157,7 +157,7 @@ static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_colo
         return;
     }
 
-    /* direct mode 可能一次刷新多个无效区域，只在最后一个区域完成后换帧。 */
+    // direct mode 可能一次刷新多个无效区域，只在最后一个区域完成后换帧
     if (!lv_disp_flush_is_last(disp_drv))
     {
         lv_disp_flush_ready(disp_drv);
@@ -167,16 +167,17 @@ static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_colo
     pending_flush_driver = disp_drv;
     __DSB(); // 确保当前帧的显存写入在提交给 LTDC 前完成
 
-    /* 只更新 LTDC 影子寄存器，等待下一次垂直消隐再生效。 */
-    if ((HAL_LTDC_SetAddress_NoReload(&hltdc, (uint32_t)color_p, LTDC_LAYER_1) != HAL_OK) ||
-        (HAL_LTDC_Reload(&hltdc, LTDC_RELOAD_VERTICAL_BLANKING) != HAL_OK))
+    // 只更新 LTDC 影子寄存器，等待下一次垂直消隐再生效
+    if ((HAL_LTDC_SetAddress_NoReload(&hltdc, (uint32_t)color_p, LTDC_LAYER_1) != HAL_OK) || // 设置LTDC下一帧显存地址，暂不生效
+        (HAL_LTDC_Reload(&hltdc, LTDC_RELOAD_VERTICAL_BLANKING) != HAL_OK)) // 硬件会自动在垂直消隐期执行重载
     {
+        // 取消等待LTDC换帧，通知LVGL本次刷新流程已经结束，避免LVGL永久阻塞
         pending_flush_driver = NULL;
         lv_disp_flush_ready(disp_drv);
     }
 }
 
-/* LTDC 在垂直消隐期间完成显存切换后，通知 LVGL 旧显存可以继续绘制。 */
+// LTDC 在垂直消隐期间完成显存切换后，通知 LVGL 旧显存可以继续绘制
 void HAL_LTDC_ReloadEventCallback(LTDC_HandleTypeDef *ltdc_handle)
 {
     lv_disp_drv_t *completed_driver;

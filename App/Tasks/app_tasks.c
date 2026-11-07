@@ -2,9 +2,15 @@
 #include "ui_task.h"
 #include "wifi_task.h"
 #include "wifi_service_port.h"
+#include "file_task.h"
 
 bool app_tasks_create(void)
 {
+    if (!file_task_create())
+    {
+        return false;
+    }
+
     // 创建队列
     if (!wifi_service_create_command_queue() ||
         !wifi_service_create_message_queue())

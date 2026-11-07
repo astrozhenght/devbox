@@ -4,7 +4,6 @@
 #include "bsp_flash.h"
 #include "bsp_lcd.h"
 #include "bsp_rtc.h"
-#include "bsp_sd.h"
 #include "bsp_touch.h"
 #include "bsp_wifi.h"
 
@@ -41,6 +40,7 @@ bsp_status_t bsp_board_init(void)
         return BSP_ERROR;
     }
     
+    // SD卡由文件任务按需初始化和挂载；缺卡不能阻止桌面启动
     // if (BSP_SD_Init(SD_Instance) != BSP_SD_ERROR_NONE)
     // {
     //     return BSP_ERROR;

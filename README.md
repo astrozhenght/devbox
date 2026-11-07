@@ -13,6 +13,7 @@ DevBox 是一个基于 STM32H743 的嵌入式桌面终端项目，使用 FreeRTO
 - 网络天气获取与显示
 - SNTP 网络时间同步和 RTC 时间维护
 - 日历界面
+- SD卡文件管理：目录浏览、真实创建时间、直属数量统计、文件和文件夹删除
 - LTDC + DMA2D LCD 显示加速
 - SDRAM 显存
 - W25Q 系列 QSPI Flash
@@ -35,7 +36,7 @@ DevBox 是一个基于 STM32H743 的嵌入式桌面终端项目，使用 FreeRTO
 - STM32 HAL / CMSIS
 - FreeRTOS V10.3.1
 - LVGL V8.3.11
-- FatFS R0.14（Revision 5380）
+- FatFS R0.16（Revision 80386，支持真实创建时间）
 - cJSON
 
 ## 软件架构
@@ -130,6 +131,8 @@ Copy-Item App/Config/wifi_credentials.example.h App/Config/wifi_credentials.h
 | --- | --- | --- |
 | 主界面 | `App/LVGL/ui_home.c` | 状态栏、时间天气和应用启动器 |
 | 串口终端 | `App/LVGL/ui_uart_terminal.c` | 串口收发与数据显示界面 |
+| 文件管理 | `App/LVGL/ui_file_manager.c` | SD卡浏览、统计与删除交互 |
+| 文件服务 | `App/Service/file_service.c` | 路径校验、分页、直属统计和逐层删除 |
 | Wi-Fi 服务 | `App/Service/wifi_service_stm32.c` | Wi-Fi命令队列、天气与时间服务适配 |
 | LCD BSP | `BSP/Src/bsp_lcd.c` | LCD 面板与帧缓冲操作 |
 | 触摸 BSP | `BSP/Src/bsp_touch.c` | GT911 初始化和触摸数据读取 |
@@ -138,6 +141,8 @@ Copy-Item App/Config/wifi_credentials.example.h App/Config/wifi_credentials.h
 | LVGL 移植 | `Platform/Port/LVGL/` | 显示、输入设备和文件系统接口 |
 
 ## 开发约定
+
+文件管理使用方法和测试说明见 [文件管理 App](Docs/FILE_MANAGER_APP_USAGE.md)。
 
 - 公共函数和变量使用小写蛇形命名，例如 `bsp_touch_init()`。
 - BSP 接口统一使用 `bsp_` 前缀。
