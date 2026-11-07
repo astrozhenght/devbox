@@ -8,6 +8,16 @@
 
 #define FILE_MANAGER_MEDIA_RETRY_MS 2000U
 #define FILE_MANAGER_ICON_SIZE      32U
+#define FILE_MANAGER_ICON_LEFT      12
+#define FILE_MANAGER_TEXT_INSET     10
+#define FILE_MANAGER_COLOR_BG       0xF5F7FA
+#define FILE_MANAGER_COLOR_TEXT     0x243247
+#define FILE_MANAGER_COLOR_MUTED    0x69788B
+#define FILE_MANAGER_COLOR_BORDER   0xE4EAF1
+#define FILE_MANAGER_COLOR_SELECTED 0xE6F0FF
+
+static const lv_coord_t file_columns[] = {LV_GRID_FR(1), 220, 190, LV_GRID_TEMPLATE_LAST};
+static const lv_coord_t file_row[] = {LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
 
 /* 文件管理页面上下文，由UI任务维护，集中保存控件、当前页数据和异步请求状态。 */
 typedef struct
@@ -17,6 +27,9 @@ typedef struct
     lv_obj_t *path_label;   /* 当前目录路径标签。 */
     lv_obj_t *status_label; /* 操作进度、错误及统计提示标签。 */
     lv_obj_t *page_label;   /* 页码标签，显示时将内部从0开始的页码加1。 */
+    lv_obj_t *list;         /* 可滚动的文件列表。 */
+    lv_obj_t *placeholder;  /* 空目录、无卡和错误提示容器。 */
+    lv_obj_t *hint_label;   /* 列表中央提示文本。 */
     lv_obj_t *up;           /* 返回上一级目录的按钮。 */
     lv_obj_t *refresh;      /* 刷新当前目录的按钮。 */
     lv_obj_t *previous;     /* 上一页按钮。 */
@@ -26,7 +39,7 @@ typedef struct
     lv_obj_t *rows[FILE_SERVICE_PAGE_SIZE];    /* 当前页各条目的可点击行，未使用的行隐藏。 */
     lv_obj_t *icons[FILE_SERVICE_PAGE_SIZE];   /* 各行的文件夹或普通文件图片。 */
     lv_obj_t *names[FILE_SERVICE_PAGE_SIZE];   /* 各行的文件或目录名称标签。 */
-    lv_obj_t *dates[FILE_SERVICE_PAGE_SIZE];   /* 各行的创建时间标签，无有效时间时显示“未知”。 */
+    lv_obj_t *dates[FILE_SERVICE_PAGE_SIZE];   /* 各行的创建时间标签，无有效时间时显示破折号。 */
     lv_obj_t *details[FILE_SERVICE_PAGE_SIZE]; /* 各行的文件大小或目录直属数量、统计状态标签。 */
     lv_obj_t *dialog;       /* 删除确认框，无确认框时为NULL。 */
     lv_timer_t *timer;      /* 50 ms周期处理结果队列和介质重试，页面关闭时删除。 */
@@ -50,20 +63,109 @@ typedef struct
 static ui_file_manager_context_t manager __attribute__((section(".axisram")));
 static file_service_event_t message __attribute__((section(".axisram")));
 
-static void request_page(const char *path, uint32_t page);
+/* 重复控件共用样式，避免20行各自分配相同属性；页面关闭后保留供下次复用。 */
+static lv_style_t button_style;
+static lv_style_t button_pressed_style;
+static lv_style_t button_disabled_style;
+static lv_style_t row_style;
+static lv_style_t row_pressed_style;
+static lv_style_t row_checked_style;
+static lv_style_t row_checked_pressed_style;
+static lv_style_t cell_styles[3];
+static bool styles_ready;
+
+static void request_page(const char *path, uint32_t page, bool background);
 static void button_event(lv_event_t *event);
+
+static void init_styles(void)
+{
+    if (styles_ready) return;
+    lv_style_init(&button_style);
+    lv_style_set_pad_all(&button_style, 3);
+    lv_style_set_radius(&button_style, 6);
+    lv_style_set_border_width(&button_style, 1);
+    lv_style_set_border_color(&button_style, lv_color_hex(FILE_MANAGER_COLOR_BORDER));
+    lv_style_set_bg_opa(&button_style, LV_OPA_COVER);
+    lv_style_set_bg_color(&button_style, lv_color_white());
+    lv_style_set_text_color(&button_style, lv_color_hex(FILE_MANAGER_COLOR_TEXT));
+    lv_style_set_text_font(&button_style, &ui_font_chinese_24_4);
+    lv_style_init(&button_pressed_style);
+    lv_style_set_bg_color(&button_pressed_style, lv_color_hex(0xEAF0F7));
+    lv_style_init(&button_disabled_style);
+    lv_style_set_bg_color(&button_disabled_style, lv_color_hex(0xEDF1F5));
+    lv_style_set_text_color(&button_disabled_style, lv_color_hex(0xA5AFBC));
+
+    lv_style_init(&row_style);
+    lv_style_set_width(&row_style, lv_pct(100));
+    lv_style_set_height(&row_style, 45);
+    lv_style_set_pad_all(&row_style, 0);
+    lv_style_set_border_width(&row_style, 1);
+    lv_style_set_border_side(&row_style, LV_BORDER_SIDE_BOTTOM);
+    lv_style_set_border_color(&row_style, lv_color_hex(FILE_MANAGER_COLOR_BORDER));
+    lv_style_set_bg_opa(&row_style, LV_OPA_COVER);
+    lv_style_set_bg_color(&row_style, lv_color_white());
+    lv_style_set_text_color(&row_style, lv_color_hex(FILE_MANAGER_COLOR_TEXT));
+    lv_style_set_layout(&row_style, LV_LAYOUT_GRID);
+    lv_style_set_grid_column_dsc_array(&row_style, file_columns);
+    lv_style_set_grid_row_dsc_array(&row_style, file_row);
+    lv_style_init(&row_pressed_style);
+    lv_style_set_bg_color(&row_pressed_style, lv_color_hex(0xF0F4FA));
+    lv_style_init(&row_checked_style);
+    lv_style_set_bg_color(&row_checked_style, lv_color_hex(FILE_MANAGER_COLOR_SELECTED));
+    lv_style_init(&row_checked_pressed_style);
+    lv_style_set_bg_color(&row_checked_pressed_style, lv_color_hex(0xD7E8FA));
+
+    for (uint32_t i = 0; i < 3U; i++)
+    {
+        lv_style_init(&cell_styles[i]);
+        lv_style_set_grid_cell_column_pos(&cell_styles[i], i);
+        lv_style_set_grid_cell_column_span(&cell_styles[i], 1);
+        lv_style_set_grid_cell_row_pos(&cell_styles[i], 0);
+        lv_style_set_grid_cell_row_span(&cell_styles[i], 1);
+        lv_style_set_grid_cell_x_align(&cell_styles[i], LV_GRID_ALIGN_STRETCH);
+        lv_style_set_grid_cell_y_align(&cell_styles[i], LV_GRID_ALIGN_CENTER);
+        lv_style_set_pad_left(&cell_styles[i], i == 0U ? 56 : 8);
+        lv_style_set_pad_right(&cell_styles[i], 12);
+        lv_style_set_text_align(&cell_styles[i], i == 2U ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT);
+        if (i != 0U) lv_style_set_text_color(&cell_styles[i], lv_color_hex(FILE_MANAGER_COLOR_MUTED));
+    }
+    styles_ready = true;
+}
 
 static lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_coord_t width)
 {
     lv_obj_t *button = lv_btn_create(parent);
+    lv_obj_remove_style_all(button);
+    lv_obj_add_style(button, &button_style, 0);
+    lv_obj_add_style(button, &button_pressed_style, LV_STATE_PRESSED);
+    lv_obj_add_style(button, &button_disabled_style, LV_STATE_DISABLED);
     lv_obj_set_size(button, width, 38);
-    lv_obj_set_style_pad_all(button, 3, 0);
-    lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
     lv_obj_center(label);
     lv_obj_add_event_cb(button, button_event, LV_EVENT_CLICKED, NULL);
     return button;
+}
+
+/* 提示容器与列表共用内容区，仅显示空目录、无卡及错误提示。 */
+static void show_placeholder(const char *text)
+{
+    if (text == NULL)
+    {
+        lv_obj_add_flag(manager.placeholder, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(manager.hint_label, text);
+    lv_obj_clear_flag(manager.placeholder, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_center(manager.placeholder);
+}
+
+static void set_status_style(bool error)
+{
+    lv_obj_set_style_text_font(manager.status_label, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_text_color(manager.status_label,
+        lv_color_hex(error ? 0xD94757 : FILE_MANAGER_COLOR_MUTED), 0);
+    lv_label_set_long_mode(manager.status_label, LV_LABEL_LONG_DOT);
 }
 
 static void set_disabled(lv_obj_t *object, bool disabled)
@@ -100,14 +202,17 @@ static void root_deleted(lv_event_t *event)
     memset(&manager, 0, sizeof(manager));
 }
 
-static void request_page(const char *path, uint32_t page)
+static void request_page(const char *path, uint32_t page, bool background)
 {
     uint32_t id;
     if (!file_task_request_list(path, page, &id))
     {
+        set_status_style(true);
         lv_label_set_text(manager.status_label, "请求队列忙，请稍后刷新");
         return;
     }
+    bool path_changed = strcmp(manager.path, path) != 0;
+    lv_obj_scroll_to_y(manager.list, 0, LV_ANIM_OFF);
     memmove(manager.path, path, strlen(path) + 1U);
     manager.request_id = id;
     manager.retry_media = false;
@@ -122,7 +227,13 @@ static void request_page(const char *path, uint32_t page)
         lv_obj_clear_state(manager.rows[i], LV_STATE_CHECKED);
     }
     lv_label_set_text(manager.path_label, manager.path);
-    lv_label_set_text(manager.status_label, "正在读取目录...");
+    /* 后台重试保留无卡提示；主动读取或切换目录时清除旧提示，不显示加载反馈。 */
+    if (!background || path_changed)
+    {
+        set_status_style(false);
+        lv_label_set_text(manager.status_label, "");
+        show_placeholder(NULL);
+    }
     lv_label_set_text_fmt(manager.page_label, "第%lu页", (unsigned long)(page + 1U));
     update_controls();
 }
@@ -139,13 +250,31 @@ static void delete_confirmed(lv_event_t *event)
     uint32_t id;
     if (!file_task_request_delete(manager.delete_path, &id))
     {
+        set_status_style(true);
         lv_label_set_text(manager.status_label, "删除请求未提交，请重试");
         return;
     }
     manager.request_id = id;
     manager.busy = manager.deleting = true;
-    lv_label_set_text(manager.status_label, "正在删除，请勿拔卡...");
+    set_status_style(true);
+    lv_label_set_text(manager.status_label, "正在删除,请勿拔卡...");
     update_controls();
+}
+
+/* 消息框使用按钮矩阵，仅为第一个“删除”按钮绘制红底白字。 */
+static void delete_dialog_button_draw(lv_event_t *event)
+{
+    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(event);
+    if (dsc->class_p != &lv_btnmatrix_class ||
+        dsc->type != LV_BTNMATRIX_DRAW_PART_BTN || dsc->id != 0U) return;
+    lv_obj_t *buttons = lv_event_get_current_target(event);
+    bool pressed = lv_obj_has_state(buttons, LV_STATE_PRESSED) &&
+                   lv_btnmatrix_get_selected_btn(buttons) == 0U;
+    dsc->rect_dsc->bg_color = pressed ? lv_palette_darken(LV_PALETTE_RED, 2) :
+                                      lv_palette_main(LV_PALETTE_RED);
+    dsc->rect_dsc->bg_opa = LV_OPA_COVER;
+    dsc->rect_dsc->border_color = dsc->rect_dsc->bg_color;
+    dsc->label_dsc->color = lv_color_white();
 }
 
 static void confirm_delete(void)
@@ -156,17 +285,28 @@ static void confirm_delete(void)
                                             manager.delete_path, sizeof(manager.delete_path));
     if (status != FILE_SERVICE_OK)
     {
+        set_status_style(true);
         lv_label_set_text(manager.status_label, file_service_status_text(status));
         return;
     }
     static const char *buttons[] = {"删除", "取消", ""};
     /* LVGL传入空正文时不会创建text对象，后续不能设置其尺寸或内容。 */
     manager.dialog = lv_msgbox_create(NULL, "确认删除", "此操作无法撤销。", buttons, false);
-    lv_obj_set_width(manager.dialog, 680);
+    lv_obj_set_width(manager.dialog, 640);
+    lv_obj_set_style_bg_color(manager.dialog, lv_color_white(), 0);
+    lv_obj_set_style_radius(manager.dialog, 10, 0);
+    lv_obj_set_style_text_color(manager.dialog, lv_color_hex(FILE_MANAGER_COLOR_TEXT), 0);
     lv_obj_set_style_text_font(manager.dialog, &ui_font_chinese_24_4, 0);
-    lv_obj_set_width(lv_msgbox_get_text(manager.dialog), 630);
-    lv_label_set_text_fmt(lv_msgbox_get_text(manager.dialog), "%s\n%s\n此操作无法撤销。",
-        manager.delete_path, entry->is_directory ? "将删除该文件夹及内部全部内容。" : "将删除此文件。");
+    lv_obj_set_style_text_color(lv_msgbox_get_title(manager.dialog), lv_color_hex(0xD94757), 0);
+    lv_obj_set_width(lv_msgbox_get_text(manager.dialog), 590);
+    lv_label_set_text_fmt(lv_msgbox_get_text(manager.dialog), "%s\n\n%s\n\n此操作无法撤销。",
+        entry->is_directory ? "将删除该文件夹及内部全部内容。" : "将删除此文件。", manager.delete_path);
+    /* 按钮在字体行高之外上下各留3像素，矩阵外侧上下各留4像素。 */
+    lv_obj_t *dialog_buttons = lv_msgbox_get_btns(manager.dialog);
+    lv_obj_set_height(dialog_buttons, lv_font_get_line_height(&ui_font_chinese_24_4) + 14);
+    lv_obj_set_style_pad_ver(dialog_buttons, 4, 0);
+    lv_obj_set_style_text_font(dialog_buttons, &ui_font_chinese_24_4, LV_PART_ITEMS);
+    lv_obj_add_event_cb(dialog_buttons, delete_dialog_button_draw, LV_EVENT_DRAW_PART_BEGIN, NULL);
     lv_obj_add_event_cb(manager.dialog, delete_confirmed, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_center(manager.dialog);
 }
@@ -190,13 +330,18 @@ static void row_event(lv_event_t *event)
         char path[FILE_SERVICE_PATH_CAP];
         file_service_status_t status = file_service_join_path(manager.path,
                                     manager.entries[index].name, path, sizeof(path));
-        if (status == FILE_SERVICE_OK) request_page(path, 0U);
+        if (status == FILE_SERVICE_OK) request_page(path, 0U, false);
         else lv_label_set_text(manager.status_label, file_service_status_text(status));
     }
     else
+    {
+        set_status_style(false);
+        lv_obj_set_style_text_font(manager.status_label, &ui_font_chinese_24_4, 0);
+        lv_label_set_long_mode(manager.status_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_text_fmt(manager.status_label, "%s  %lu B%s", manager.entries[index].name,
             (unsigned long)manager.entries[index].size_bytes,
             manager.entries[index].read_only ? "  只读" : "");
+    }
 }
 
 static void button_event(lv_event_t *event)
@@ -204,15 +349,15 @@ static void button_event(lv_event_t *event)
     lv_obj_t *target = lv_event_get_current_target(event);
     if (manager.deleting) return;
     if (target == manager.close) lv_obj_del(manager.root);
-    else if (target == manager.refresh) request_page(manager.path, manager.page);
-    else if (target == manager.previous && manager.page > 0U) request_page(manager.path, manager.page - 1U);
-    else if (target == manager.next && manager.has_next) request_page(manager.path, manager.page + 1U);
+    else if (target == manager.refresh) request_page(manager.path, manager.page, false);
+    else if (target == manager.previous && manager.page > 0U) request_page(manager.path, manager.page - 1U, false);
+    else if (target == manager.next && manager.has_next) request_page(manager.path, manager.page + 1U, false);
     else if (target == manager.remove) confirm_delete();
     else if (target == manager.up)
     {
         char path[FILE_SERVICE_PATH_CAP];
         strcpy(path, manager.path);
-        if (file_service_parent_path(path)) request_page(path, 0U);
+        if (file_service_parent_path(path)) request_page(path, 0U, true);
     }
 }
 
@@ -222,16 +367,20 @@ static void show_entry(void)
     if (i >= FILE_SERVICE_PAGE_SIZE) return;
     manager.entries[i] = message.entry;
     if (manager.count <= i) manager.count = i + 1U;
+    show_placeholder(NULL);
     const lv_img_dsc_t *icon = message.entry.is_directory ? &ui_img_icon_folder48 : &ui_img_icon_file32;
     lv_img_set_src(manager.icons[i], icon);
+    /* 将图片等比例缩放到32像素基准，保留REAL模式计算出的实际边界。 */
     lv_img_set_zoom(manager.icons[i], (FILE_MANAGER_ICON_SIZE * 256U + icon->header.w / 2U) / icon->header.w);
-    lv_obj_align(manager.icons[i], LV_ALIGN_LEFT_MID, 8, 0);
+    /* 缩放后的边界含抗锯齿余量，按实际宽度居中到统一的32像素图标栏。 */
+    lv_obj_set_style_translate_x(manager.icons[i], FILE_MANAGER_ICON_LEFT +
+        ((lv_coord_t)FILE_MANAGER_ICON_SIZE - lv_obj_get_self_width(manager.icons[i])) / 2, 0);
     lv_label_set_text(manager.names[i], message.entry.name);
     const file_service_time_t *time = &message.entry.created;
     if (time->valid)
         lv_label_set_text_fmt(manager.dates[i], "%04u-%02u-%02u %02u:%02u",
             time->year, time->month, time->day, time->hour, time->minute);
-    else lv_label_set_text(manager.dates[i], "未知");
+    else lv_label_set_text(manager.dates[i], "—");
     if (message.entry.is_directory) lv_label_set_text(manager.details[i], "统计中...");
     else if (message.entry.size_bytes >= 1024U * 1024U)
         lv_label_set_text_fmt(manager.details[i], "%lu.%lu MiB",
@@ -259,7 +408,7 @@ static void poll_results(lv_timer_t *timer)
                 manager.files = message.files;
                 manager.directories = message.directories;
                 manager.has_next = message.has_next;
-                lv_label_set_text_fmt(manager.status_label, "%lu个文件夹，%lu个文件；正在统计...",
+                lv_label_set_text_fmt(manager.status_label, "%lu个文件夹 / %lu个文件,统计中...",
                     (unsigned long)manager.directories, (unsigned long)manager.files);
                 break;
             case FILE_SERVICE_EVENT_COUNT:
@@ -272,40 +421,52 @@ static void poll_results(lv_timer_t *timer)
                 }
                 break;
             case FILE_SERVICE_EVENT_DELETE_PROGRESS:
-                lv_label_set_text_fmt(manager.status_label, "已删除%lu项，请勿拔卡...", (unsigned long)message.deleted);
+                lv_label_set_text_fmt(manager.status_label, "已删除%lu项,请勿拔卡...", (unsigned long)message.deleted);
                 break;
             case FILE_SERVICE_EVENT_DONE:
             {
                 bool was_deleting = manager.deleting;
                 manager.busy = manager.deleting = false;
+                set_status_style(message.status != FILE_SERVICE_OK);
+                show_placeholder(NULL);
                 if (message.status != FILE_SERVICE_OK)
                 {
-                    lv_label_set_text_fmt(manager.status_label, "%s (FR=%ld)，已删除%lu项：%s",
-                        file_service_status_text(message.status), (long)message.native_error,
+                    LV_LOG_WARN("File request %lu: status=%d FR=%ld deleted=%lu path=%s",
+                        (unsigned long)message.request_id, (int)message.status, (long)message.native_error,
                         (unsigned long)message.deleted, message.path);
+                    lv_label_set_text(manager.status_label, file_service_status_text(message.status));
                     /* 部分删除后列表已过期，必须刷新后才能再次操作。 */
-                    if (was_deleting) show_selected(-1);
+                    if (was_deleting)
+                    {
+                        lv_label_set_text_fmt(manager.status_label, "删除失败,已删除%lu项,请刷新",
+                            (unsigned long)message.deleted);
+                        show_selected(-1);
+                    }
                     else if (message.status == FILE_SERVICE_NOT_READY)
                     {
                         manager.retry_media = true;
                         manager.media_retry_tick = lv_tick_get();
-                        lv_label_set_text_fmt(manager.status_label,
-                            "SD卡未就绪，请插卡；每2秒自动重试 (FR=%ld)",
-                            (long)message.native_error);
+                        lv_label_set_text(manager.status_label, "插卡后将自动重试");
+                        if (manager.count == 0U)
+                            show_placeholder("SD卡未就绪\n插卡后将自动重试");
                     }
+                    else if (manager.count == 0U)
+                        show_placeholder(file_service_status_text(message.status));
                 }
                 else if (was_deleting)
                 {
-                    request_page(manager.path, manager.page);
+                    request_page(manager.path, manager.page, false);
                 }
                 else if (manager.count == 0U && manager.page > 0U)
                 {
-                    request_page(manager.path, manager.page - 1U);
+                    request_page(manager.path, manager.page - 1U, false);
                 }
                 else
-                    lv_label_set_text_fmt(manager.status_label, "%lu个文件夹，%lu个文件%s",
-                        (unsigned long)manager.directories, (unsigned long)manager.files,
-                        manager.count == 0U ? "；此文件夹为空" : "；长按条目可删除");
+                {
+                    lv_label_set_text_fmt(manager.status_label, "%lu个文件夹 / %lu个文件",
+                        (unsigned long)manager.directories, (unsigned long)manager.files);
+                    if (manager.count == 0U) show_placeholder("此文件夹为空");
+                }
                 update_controls();
                 break;
             }
@@ -317,15 +478,28 @@ static void poll_results(lv_timer_t *timer)
         lv_tick_elaps(manager.media_retry_tick) >= FILE_MANAGER_MEDIA_RETRY_MS)
     {
         manager.media_retry_tick = lv_tick_get();
-        request_page(manager.path, manager.page);
+        request_page(manager.path, manager.page, true);
     }
 }
 
-static lv_obj_t *make_label(lv_obj_t *parent, lv_coord_t x, lv_coord_t width, const char *text)
+/* 创建轻量布局容器，显式去掉主题默认边框、阴影及内边距。 */
+static lv_obj_t *make_panel(lv_obj_t *parent)
+{
+    lv_obj_t *panel = lv_obj_create(parent);
+    lv_obj_set_style_pad_all(panel, 0, 0);
+    lv_obj_set_style_border_width(panel, 0, 0);
+    lv_obj_set_style_shadow_width(panel, 0, 0);
+    lv_obj_set_style_radius(panel, 0, 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    return panel;
+}
+
+/* 表头与文件行共用列宽；名称留出图标位置，数量和大小靠右对齐。 */
+static lv_obj_t *make_cell(lv_obj_t *parent, uint32_t column, const char *text)
 {
     lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, width);
-    lv_obj_set_pos(label, x, 7);
+    lv_obj_add_style(label, &cell_styles[column], 0);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, text);
     return label;
@@ -340,82 +514,154 @@ void ui_file_manager_create(lv_obj_t *parent)
     }
     memset(&manager, 0, sizeof(manager));
     manager.selected = -1;
+    init_styles();
     manager.root = lv_obj_create(parent);
     lv_obj_set_size(manager.root, lv_pct(100), lv_pct(92));
     lv_obj_set_y(manager.root, lv_pct(8));
     lv_obj_set_style_pad_all(manager.root, 8, 0);
+    lv_obj_set_style_pad_row(manager.root, 4, 0);
+    lv_obj_set_style_border_width(manager.root, 0, 0);
     lv_obj_set_style_radius(manager.root, 0, 0);
+    lv_obj_set_style_bg_color(manager.root, lv_color_hex(FILE_MANAGER_COLOR_BG), 0);
     lv_obj_set_style_text_font(manager.root, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_text_color(manager.root, lv_color_hex(FILE_MANAGER_COLOR_TEXT), 0);
     lv_obj_clear_flag(manager.root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(manager.root, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_event_cb(manager.root, root_deleted, LV_EVENT_DELETE, NULL);
 
-    manager.title_label = lv_label_create(manager.root);
+    lv_obj_t *toolbar = make_panel(manager.root);
+    lv_obj_set_size(toolbar, lv_pct(100), 42);
+    lv_obj_set_style_pad_left(toolbar, FILE_MANAGER_TEXT_INSET, 0);
+    lv_obj_set_style_pad_column(toolbar, 8, 0);
+    lv_obj_set_flex_flow(toolbar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    manager.title_label = lv_label_create(toolbar);
     lv_label_set_text(manager.title_label, "文件管理器");
     lv_obj_set_style_text_color(manager.title_label, lv_palette_main(LV_PALETTE_PINK), 0);
-    lv_obj_align(manager.title_label, LV_ALIGN_TOP_LEFT, 0, 4);
+    lv_obj_t *spacer = make_panel(toolbar);
+    lv_obj_set_size(spacer, 0, 1);
+    lv_obj_set_flex_grow(spacer, 1);
 
-    /* 右上角从左到右为上一级、刷新、返回主页，按钮之间保留10像素间距。 */
-    manager.up = make_button(manager.root, "上一级", 100);
-    lv_obj_align(manager.up, LV_ALIGN_TOP_RIGHT, -230, 0);
-    manager.refresh = make_button(manager.root, "刷新", 90);
-    lv_obj_set_style_bg_color(manager.refresh, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_align(manager.refresh, LV_ALIGN_TOP_RIGHT, -130, 0);
-    manager.close = make_button(manager.root, "返回主页", 120);
-    lv_obj_set_style_bg_color(manager.close, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_align(manager.close, LV_ALIGN_TOP_RIGHT, 0, 0);
-    manager.path_label = lv_label_create(manager.root);
-    lv_obj_set_pos(manager.path_label, 0, 46);
-    lv_obj_set_width(manager.path_label, lv_pct(100));
+    /* 从左到右为上一级、刷新、返回主页；保留绿色和红色的按下反馈。 */
+    manager.up = make_button(toolbar, "上一级", 96);
+    manager.refresh = make_button(toolbar, "刷新", 80);
+    lv_obj_set_style_bg_color(manager.refresh, lv_palette_main(LV_PALETTE_GREEN), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(manager.refresh, lv_color_white(), LV_STATE_PRESSED);
+    manager.close = make_button(toolbar, "返回主页", 112);
+    lv_obj_set_style_bg_color(manager.close, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(manager.close, lv_color_white(), LV_STATE_PRESSED);
+
+    lv_obj_t *path_bar = make_panel(manager.root);
+    lv_obj_set_size(path_bar, lv_pct(100), 34);
+    lv_obj_set_style_bg_opa(path_bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(path_bar, lv_color_hex(0xEAF0F6), 0);
+    lv_obj_set_style_radius(path_bar, 6, 0);
+    lv_obj_set_style_pad_hor(path_bar, FILE_MANAGER_TEXT_INSET, 0);
+    lv_obj_set_style_pad_column(path_bar, 12, 0);
+    lv_obj_set_flex_flow(path_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(path_bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *path_caption = lv_label_create(path_bar);
+    lv_label_set_text(path_caption, "当前位置");
+    lv_obj_set_style_text_color(path_caption, lv_color_hex(FILE_MANAGER_COLOR_MUTED), 0);
+    manager.path_label = lv_label_create(path_bar);
+    lv_obj_set_width(manager.path_label, 0);
+    lv_obj_set_flex_grow(manager.path_label, 1);
     lv_label_set_long_mode(manager.path_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
-    lv_obj_t *head = lv_obj_create(manager.root);
-    lv_obj_set_pos(head, 0, 80);
-    lv_obj_set_size(head, lv_pct(100), 38);
-    lv_obj_set_style_pad_all(head, 0, 0);
-    lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
-    make_label(head, 8, 280, "名称");
-    make_label(head, 300, 230, "创建时间");
-    make_label(head, 540, 210, "直属数量 / 大小");
+    lv_obj_t *browser = make_panel(manager.root);
+    lv_obj_set_size(browser, lv_pct(100), 0);
+    lv_obj_set_flex_grow(browser, 1);
+    lv_obj_set_flex_flow(browser, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(browser, 0, 0);
+    lv_obj_set_style_bg_opa(browser, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(browser, lv_color_white(), 0);
+    lv_obj_set_style_border_width(browser, 1, 0);
+    lv_obj_set_style_border_color(browser, lv_color_hex(FILE_MANAGER_COLOR_BORDER), 0);
+    lv_obj_set_style_radius(browser, 8, 0);
 
-    lv_obj_t *list = lv_obj_create(manager.root);
-    lv_obj_set_pos(list, 0, 120);
-    lv_obj_set_size(list, lv_pct(100), 200);
-    lv_obj_set_style_pad_all(list, 0, 0);
-    lv_obj_set_style_pad_row(list, 3, 0);
-    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t *head = make_panel(browser);
+    lv_obj_set_size(head, lv_pct(100), 32);
+    lv_obj_set_style_bg_opa(head, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(head, lv_color_hex(0xF0F4F8), 0);
+    lv_obj_set_style_border_width(head, 1, 0);
+    lv_obj_set_style_border_side(head, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(head, lv_color_hex(FILE_MANAGER_COLOR_BORDER), 0);
+    lv_obj_set_style_text_color(head, lv_color_hex(FILE_MANAGER_COLOR_MUTED), 0);
+    lv_obj_set_grid_dsc_array(head, file_columns, file_row);
+    make_cell(head, 0, "名称");
+    make_cell(head, 1, "创建时间");
+    make_cell(head, 2, "数量 / 大小");
+
+    lv_obj_t *body = make_panel(browser);
+    lv_obj_set_size(body, lv_pct(100), 0);
+    lv_obj_set_flex_grow(body, 1);
+    manager.list = make_panel(body);
+    lv_obj_set_size(manager.list, lv_pct(100), lv_pct(100));
+    lv_obj_add_flag(manager.list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(manager.list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(manager.list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(manager.list, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(manager.list, 2, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(manager.list, lv_color_hex(0xB8C5D4), LV_PART_SCROLLBAR);
+    lv_obj_set_flex_flow(manager.list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(manager.list, 0, 0);
     for (uint32_t i = 0; i < FILE_SERVICE_PAGE_SIZE; i++)
     {
-        lv_obj_t *row = lv_btn_create(list);
+        lv_obj_t *row = lv_btn_create(manager.list);
         manager.rows[i] = row;
-        lv_obj_set_size(row, lv_pct(100), 48);
-        lv_obj_set_style_pad_all(row, 0, 0);
-        lv_obj_set_style_shadow_width(row, 0, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0xE8EDF2), 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(0xA8D3FF), LV_STATE_CHECKED);
-        lv_obj_set_style_text_color(row, lv_color_black(), 0);
+        lv_obj_remove_style_all(row);
+        lv_obj_add_style(row, &row_style, 0);
+        lv_obj_add_style(row, &row_pressed_style, LV_STATE_PRESSED);
+        lv_obj_add_style(row, &row_checked_style, LV_STATE_CHECKED);
+        lv_obj_add_style(row, &row_checked_pressed_style, LV_STATE_CHECKED | LV_STATE_PRESSED);
         lv_obj_add_event_cb(row, row_event, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
         lv_obj_add_event_cb(row, row_event, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)i);
         manager.icons[i] = lv_img_create(row);
+        /* 按缩放后的实际边界布局，保证两种图标的中心及垂直位置一致。 */
         lv_img_set_size_mode(manager.icons[i], LV_IMG_SIZE_MODE_REAL);
+        lv_obj_set_size(manager.icons[i], LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_clear_flag(manager.icons[i], LV_OBJ_FLAG_CLICKABLE);
-        manager.names[i] = make_label(row, 52, 236, "");
-        manager.dates[i] = make_label(row, 300, 230, "");
-        manager.details[i] = make_label(row, 540, 210, "");
+        lv_obj_set_grid_cell(manager.icons[i], LV_GRID_ALIGN_START, 0, 1,
+                            LV_GRID_ALIGN_CENTER, 0, 1);
+        manager.names[i] = make_cell(row, 0, "");
+        manager.dates[i] = make_cell(row, 1, "");
+        manager.details[i] = make_cell(row, 2, "");
         lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
     }
-    manager.previous = make_button(manager.root, "上一页", 100);
-    lv_obj_set_pos(manager.previous, 0, 326);
-    manager.page_label = lv_label_create(manager.root);
-    lv_obj_set_pos(manager.page_label, 120, 332);
-    manager.next = make_button(manager.root, "下一页", 100);
-    lv_obj_set_pos(manager.next, 260, 326);
-    manager.remove = make_button(manager.root, "删除", 100);
-    lv_obj_set_style_bg_color(manager.remove, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_align(manager.remove, LV_ALIGN_TOP_RIGHT, 0, 326);
-    manager.status_label = lv_label_create(manager.root);
-    lv_obj_set_pos(manager.status_label, 0, 374);
-    lv_obj_set_width(manager.status_label, lv_pct(100));
-    lv_label_set_long_mode(manager.status_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+
+    manager.placeholder = make_panel(body);
+    lv_obj_set_size(manager.placeholder, lv_pct(90), LV_SIZE_CONTENT);
+    lv_obj_clear_flag(manager.placeholder, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_flex_flow(manager.placeholder, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(manager.placeholder, 12, 0);
+    lv_obj_set_flex_align(manager.placeholder, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    manager.hint_label = lv_label_create(manager.placeholder);
+    lv_obj_set_width(manager.hint_label, lv_pct(100));
+    lv_obj_set_style_text_align(manager.hint_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(manager.hint_label, lv_color_hex(FILE_MANAGER_COLOR_MUTED), 0);
+    lv_obj_center(manager.placeholder);
+
+    lv_obj_t *footer = make_panel(manager.root);
+    lv_obj_set_size(footer, lv_pct(100), 40);
+    lv_obj_set_style_pad_column(footer, 8, 0);
+    lv_obj_set_flex_flow(footer, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(footer, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    manager.status_label = lv_label_create(footer);
+    lv_obj_set_width(manager.status_label, 0);
+    lv_obj_set_flex_grow(manager.status_label, 1);
+    set_status_style(false);
+    manager.previous = make_button(footer, "上一页", 94);
+    manager.page_label = lv_label_create(footer);
+    lv_obj_set_width(manager.page_label, 92);
+    lv_obj_set_style_text_align(manager.page_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(manager.page_label, LV_LABEL_LONG_DOT);
+    manager.next = make_button(footer, "下一页", 94);
+    manager.remove = make_button(footer, "删除", 78);
+    lv_obj_set_style_bg_color(manager.remove, lv_color_hex(0xFFF4F5), 0);
+    lv_obj_set_style_border_color(manager.remove, lv_color_hex(0xF1C8CE), 0);
+    lv_obj_set_style_text_color(manager.remove, lv_color_hex(0xD94757), 0);
+    lv_obj_set_style_bg_color(manager.remove, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(manager.remove, lv_color_white(), LV_STATE_PRESSED);
     manager.timer = lv_timer_create(poll_results, 50U, NULL);
-    request_page(FILE_SERVICE_ROOT, 0U);
+    request_page(FILE_SERVICE_ROOT, 0U, false);
 }
