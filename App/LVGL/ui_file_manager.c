@@ -1,16 +1,19 @@
 #include "ui_file_manager.h"
 #include "file_task.h"
 #include "ui_fonts.h"
+#include "ui_images.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #define FILE_MANAGER_MEDIA_RETRY_MS 2000U
+#define FILE_MANAGER_ICON_SIZE      32U
 
 /* 文件管理页面上下文，由UI任务维护，集中保存控件、当前页数据和异步请求状态。 */
 typedef struct
 {
     lv_obj_t *root;         /* 页面根容器，NULL表示页面尚未创建或已关闭。 */
+    lv_obj_t *title_label;  /* 左上角粉红色App名称标签。 */
     lv_obj_t *path_label;   /* 当前目录路径标签。 */
     lv_obj_t *status_label; /* 操作进度、错误及统计提示标签。 */
     lv_obj_t *page_label;   /* 页码标签，显示时将内部从0开始的页码加1。 */
@@ -21,6 +24,7 @@ typedef struct
     lv_obj_t *remove;       /* 删除选中项的按钮。 */
     lv_obj_t *close;        /* 关闭文件管理并返回主页的按钮。 */
     lv_obj_t *rows[FILE_SERVICE_PAGE_SIZE];    /* 当前页各条目的可点击行，未使用的行隐藏。 */
+    lv_obj_t *icons[FILE_SERVICE_PAGE_SIZE];   /* 各行的文件夹或普通文件图片。 */
     lv_obj_t *names[FILE_SERVICE_PAGE_SIZE];   /* 各行的文件或目录名称标签。 */
     lv_obj_t *dates[FILE_SERVICE_PAGE_SIZE];   /* 各行的创建时间标签，无有效时间时显示“未知”。 */
     lv_obj_t *details[FILE_SERVICE_PAGE_SIZE]; /* 各行的文件大小或目录直属数量、统计状态标签。 */
@@ -218,8 +222,11 @@ static void show_entry(void)
     if (i >= FILE_SERVICE_PAGE_SIZE) return;
     manager.entries[i] = message.entry;
     if (manager.count <= i) manager.count = i + 1U;
-    lv_label_set_text_fmt(manager.names[i], "%s %s",
-        message.entry.is_directory ? LV_SYMBOL_DIRECTORY : LV_SYMBOL_FILE, message.entry.name);
+    const lv_img_dsc_t *icon = message.entry.is_directory ? &ui_img_icon_folder48 : &ui_img_icon_file32;
+    lv_img_set_src(manager.icons[i], icon);
+    lv_img_set_zoom(manager.icons[i], (FILE_MANAGER_ICON_SIZE * 256U + icon->header.w / 2U) / icon->header.w);
+    lv_obj_align(manager.icons[i], LV_ALIGN_LEFT_MID, 8, 0);
+    lv_label_set_text(manager.names[i], message.entry.name);
     const file_service_time_t *time = &message.entry.created;
     if (time->valid)
         lv_label_set_text_fmt(manager.dates[i], "%04u-%02u-%02u %02u:%02u",
@@ -342,12 +349,20 @@ void ui_file_manager_create(lv_obj_t *parent)
     lv_obj_clear_flag(manager.root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(manager.root, root_deleted, LV_EVENT_DELETE, NULL);
 
-    manager.close = make_button(manager.root, "返回主页", 120);
-    lv_obj_set_pos(manager.close, 0, 0);
+    manager.title_label = lv_label_create(manager.root);
+    lv_label_set_text(manager.title_label, "文件管理器");
+    lv_obj_set_style_text_color(manager.title_label, lv_palette_main(LV_PALETTE_PINK), 0);
+    lv_obj_align(manager.title_label, LV_ALIGN_TOP_LEFT, 0, 4);
+
+    /* 右上角从左到右为上一级、刷新、返回主页，按钮之间保留10像素间距。 */
     manager.up = make_button(manager.root, "上一级", 100);
-    lv_obj_set_pos(manager.up, 135, 0);
+    lv_obj_align(manager.up, LV_ALIGN_TOP_RIGHT, -230, 0);
     manager.refresh = make_button(manager.root, "刷新", 90);
-    lv_obj_align(manager.refresh, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_set_style_bg_color(manager.refresh, lv_palette_main(LV_PALETTE_GREEN), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_align(manager.refresh, LV_ALIGN_TOP_RIGHT, -130, 0);
+    manager.close = make_button(manager.root, "返回主页", 120);
+    lv_obj_set_style_bg_color(manager.close, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_align(manager.close, LV_ALIGN_TOP_RIGHT, 0, 0);
     manager.path_label = lv_label_create(manager.root);
     lv_obj_set_pos(manager.path_label, 0, 46);
     lv_obj_set_width(manager.path_label, lv_pct(100));
@@ -380,7 +395,10 @@ void ui_file_manager_create(lv_obj_t *parent)
         lv_obj_set_style_text_color(row, lv_color_black(), 0);
         lv_obj_add_event_cb(row, row_event, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
         lv_obj_add_event_cb(row, row_event, LV_EVENT_LONG_PRESSED, (void *)(uintptr_t)i);
-        manager.names[i] = make_label(row, 8, 280, "");
+        manager.icons[i] = lv_img_create(row);
+        lv_img_set_size_mode(manager.icons[i], LV_IMG_SIZE_MODE_REAL);
+        lv_obj_clear_flag(manager.icons[i], LV_OBJ_FLAG_CLICKABLE);
+        manager.names[i] = make_label(row, 52, 236, "");
         manager.dates[i] = make_label(row, 300, 230, "");
         manager.details[i] = make_label(row, 540, 210, "");
         lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
@@ -392,6 +410,7 @@ void ui_file_manager_create(lv_obj_t *parent)
     manager.next = make_button(manager.root, "下一页", 100);
     lv_obj_set_pos(manager.next, 260, 326);
     manager.remove = make_button(manager.root, "删除", 100);
+    lv_obj_set_style_bg_color(manager.remove, lv_palette_main(LV_PALETTE_RED), LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_align(manager.remove, LV_ALIGN_TOP_RIGHT, 0, 326);
     manager.status_label = lv_label_create(manager.root);
     lv_obj_set_pos(manager.status_label, 0, 374);

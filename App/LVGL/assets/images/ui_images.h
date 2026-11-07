@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 LV_IMG_DECLARE(ui_img_icon_folder48);
+LV_IMG_DECLARE(ui_img_icon_file32);
 LV_IMG_DECLARE(ui_img_icon_debug);
 LV_IMG_DECLARE(ui_img_icon_music);
 LV_IMG_DECLARE(ui_img_icon_setting);

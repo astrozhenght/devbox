@@ -485,6 +485,11 @@
               <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_folder48.c</FilePath>
             </File>
             <File>
+              <FileName>ui_img_icon_file32.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_file32.c</FilePath>
+            </File>
+            <File>
               <FileName>ui_img_icon_music.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_music.c</FilePath>
