@@ -51,6 +51,11 @@ uart_service_status_t uart_service_port_open(const uart_service_config_t *config
         default:
             return UART_SERVICE_ERROR_INVALID_CONFIG;
     }
+    /* Init会重置UART接收状态，但不会终止旧DMA；重开及改参数前必须先释放传输。 */
+    if (uart_service_port_close() != UART_SERVICE_OK)
+    {
+        return UART_SERVICE_ERROR_TRANSPORT;
+    }
     if (HAL_UART_Init(&huart1) != HAL_OK) // 重新初始化UART，内部包含使能UART
     {
         return UART_SERVICE_ERROR_INIT;
@@ -60,9 +65,11 @@ uart_service_status_t uart_service_port_open(const uart_service_config_t *config
 
 uart_service_status_t uart_service_port_close(void)
 {
-    HAL_UART_DMAStop(&huart1);   // 停止DMA接收
-    __HAL_UART_DISABLE(&huart1); // 禁用UART
-    return UART_SERVICE_OK;
+    /* 禁止新接收及IDLE回调，再同步终止收发；不依赖可能失配的RxState。 */
+    __HAL_UART_DISABLE_IT(&huart1, UART_IT_IDLE);
+    __HAL_UART_DISABLE(&huart1);
+    // HAL_UART_Abort()包含停止DMA的处理
+    return HAL_UART_Abort(&huart1) == HAL_OK ? UART_SERVICE_OK : UART_SERVICE_ERROR_TRANSPORT;
 }
 
 uart_service_status_t uart_service_port_reconfigure_rx_params(void)
