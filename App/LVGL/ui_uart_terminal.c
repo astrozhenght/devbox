@@ -696,7 +696,7 @@ static void ui_uart_terminal_create_send_area(void)
     lv_textarea_set_placeholder_text(uart_context.send_area, "输入发送内容...");
     lv_obj_add_event_cb(uart_context.send_area, send_textarea_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(uart_context.send_area, send_textarea_event_cb, LV_EVENT_CANCEL, NULL);
-    uart_context.ctrl_panel_tx_btn = uart_ui_button(row, "发送", 80);
+    uart_context.ctrl_panel_tx_btn = uart_ui_button(row, "发送", 72);
     lv_obj_set_style_bg_color(uart_context.ctrl_panel_tx_btn, lv_palette_main(LV_PALETTE_BLUE), 0);
     lv_obj_set_style_text_color(uart_context.ctrl_panel_tx_btn, lv_color_white(), 0);
     lv_obj_set_style_bg_color(uart_context.ctrl_panel_tx_btn, lv_palette_darken(LV_PALETTE_BLUE, 2), LV_STATE_PRESSED);

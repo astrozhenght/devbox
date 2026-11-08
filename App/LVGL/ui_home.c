@@ -9,6 +9,15 @@
 #include "ui_images.h"
 #include "ui_fonts.h"
 
+#define HOME_UI_BG_COLOR          0xF5F7FA
+#define HOME_UI_CARD_COLOR        0xFFFFFF
+#define HOME_UI_TEXT_COLOR        0x243247
+#define HOME_UI_MUTED_COLOR       0x69788B
+#define HOME_UI_BORDER_COLOR      0xE4EAF1
+#define HOME_UI_PRESSED_COLOR     0xE6F0FF
+#define HOME_UI_DISABLED_TEXT     0xA5AFBC
+#define HOME_UI_PRIMARY_BLUE      0x2196F3
+
 typedef enum
 {
     APP_UART_TERMINAL = 0,
@@ -20,6 +29,31 @@ typedef enum
     APP_CALENDAR,
     APP_COUNT
 } ui_home_app_id_t;
+
+typedef struct
+{
+    const char *name;
+    const char *fallback_icon;
+    const lv_img_dsc_t *icon;
+    bool enabled;
+    uint8_t grid_column;
+    uint8_t grid_row;
+} ui_home_app_descriptor_t;
+
+/*
+ * 应用名称、图标和可用状态集中定义，避免每个入口分别设置样式后逐渐失去一致性。
+ * 尚未实现页面入口的应用保持可见但禁用，让用户能够区分“预留功能”和“可用功能”。
+ */
+static const ui_home_app_descriptor_t app_descriptors[APP_COUNT] =
+{
+    [APP_UART_TERMINAL] = {"串口助手",     "UART",  &ui_img_icon_uart,     true,  0, 0},
+    [APP_FILE_MANAGER]  = {"文件管理",     "FILE",  &ui_img_icon_folder48, true,  1, 0},
+    [APP_SETTINGS]      = {"设置",         "SET",   &ui_img_icon_setting,  false, 4, 0},
+    [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    false, 5, 0},
+    [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_debug,    false, 0, 1},
+    [APP_WEATHER]       = {"天气",         "WEA",   &ui_img_icon_weather,  true,  2, 0},
+    [APP_CALENDAR]      = {"日历",         "CAL",   &ui_img_icon_calendar, true,  3, 0},
+};
 
 typedef struct
 {
@@ -40,6 +74,9 @@ typedef struct
     lv_obj_t* status_bar_ram_usage_label; // 三级
     lv_obj_t* status_bar_wifi_icon;       // 三级
     lv_obj_t* status_bar_time_label;      // 三级
+    lv_obj_t* time_group;                 // 左侧时间和日期信息组
+    lv_obj_t* datetime_divider;            // 时间与天气之间的分隔线
+    lv_obj_t* weather_group;              // 右侧当前天气信息组
     lv_obj_t* tw_time_label;              // 三级
     lv_obj_t* tw_date_label;              // 三级
     lv_obj_t* tw_weather_icon;            // 三级
@@ -47,6 +84,7 @@ typedef struct
     lv_timer_t* refresh_timer;            // 定时器
     lv_style_t style_btn_normal;          // 样式，按钮正常样式
     lv_style_t style_btn_pressed;         // 样式，按钮按下样式
+    lv_style_t style_btn_disabled;        // 样式，尚未开放的应用
     ui_home_app_item_t app_items[APP_COUNT]; // 三级，App结构体数组
 } ui_home_context_t;
 
@@ -61,27 +99,34 @@ static void ui_home_format_date(char* out, uint8_t month, uint8_t date, uint8_t 
 static void ui_home_format_time(char* out, uint8_t hour, uint8_t minute);
 static lv_obj_t *ui_home_create_root(lv_obj_t *parent);
 static void ui_home_configure_layout(void);
+static void ui_home_style_card(lv_obj_t *card);
 
 // 创建主页-状态栏
 static void ui_home_create_status_bar(lv_obj_t *parent)
 {
-    char time_str[6];
+    char time_str[6] = {0};
     time_service_datetime_t datetime = {0};
     time_service_get_datetime(&datetime); // 从RTC读取日期和时间
 
     home_context.system_status_bar = lv_obj_create(parent);
-    lv_obj_set_style_pad_left(home_context.system_status_bar, 25, 0);
-    lv_obj_set_style_pad_right(home_context.system_status_bar, 25, 0);
     lv_obj_clear_flag(home_context.system_status_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(home_context.system_status_bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(home_context.system_status_bar, 0, 0);
+    lv_obj_set_style_radius(home_context.system_status_bar, 0, 0);
+    lv_obj_set_style_pad_hor(home_context.system_status_bar, 12, 0);
+    lv_obj_set_style_pad_ver(home_context.system_status_bar, 0, 0);
+    lv_obj_set_style_pad_column(home_context.system_status_bar, 18, 0);
 
     home_context.status_bar_cpu_usage_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_cpu_usage_label, &ui_font_chinese_24_4, 0);
-    lv_obj_set_style_text_color(home_context.status_bar_cpu_usage_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.status_bar_cpu_usage_label,
+                                lv_color_hex(HOME_UI_MUTED_COLOR), 0);
     lv_label_set_text(home_context.status_bar_cpu_usage_label, "CPU:27%");
 
     home_context.status_bar_ram_usage_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_ram_usage_label, &ui_font_chinese_24_4, 0);
-    lv_obj_set_style_text_color(home_context.status_bar_ram_usage_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.status_bar_ram_usage_label,
+                                lv_color_hex(HOME_UI_MUTED_COLOR), 0);
     lv_label_set_text(home_context.status_bar_ram_usage_label, "RAM:27%");
 
     home_context.status_bar_wifi_icon = lv_label_create(home_context.system_status_bar);
@@ -91,90 +136,183 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
 
     home_context.status_bar_time_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_time_label, &ui_font_chinese_24_4, 0);
-    lv_obj_set_style_text_color(home_context.status_bar_time_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.status_bar_time_label,
+                                lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
     ui_home_format_time(time_str, datetime.hour, datetime.minute); // 格式化时间，例如: "23:09"
     time_str[5] = '\0'; // 手动补上结束符
     lv_label_set_text(home_context.status_bar_time_label, time_str); // 把读取到的RTC时间，刷新显示到主界面
 
-    lv_obj_set_style_radius(home_context.system_status_bar, 0, 0);  // 设置圆角为0，变成矩形
-    //static const lv_coord_t status_grid_cols[] = { LV_GRID_FR(20), LV_GRID_FR(20), LV_GRID_FR(86), LV_GRID_FR(12), LV_GRID_FR(12), LV_GRID_TEMPLATE_LAST };
-    static const lv_coord_t status_grid_cols[] = { LV_GRID_FR(13), LV_GRID_FR(13), LV_GRID_FR(58), LV_GRID_FR(8), LV_GRID_FR(8), LV_GRID_TEMPLATE_LAST };
+    /* 中间弹性列吸收剩余空间，保证 Wi-Fi 和时间始终贴近右侧且不会跳动。 */
+    static const lv_coord_t status_grid_cols[] = {
+        LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_FR(1),
+        LV_GRID_CONTENT, LV_GRID_CONTENT,
+        LV_GRID_TEMPLATE_LAST
+    };
     static const lv_coord_t status_grid_rows[] = { LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
     lv_obj_set_grid_dsc_array(home_context.system_status_bar, status_grid_cols, status_grid_rows);
-    lv_obj_set_style_grid_row_align(home_context.system_status_bar, LV_GRID_ALIGN_SPACE_BETWEEN, 0); // 均匀分布，首尾元素贴边，剩余空间在元素之间
-    lv_obj_set_grid_cell(home_context.status_bar_cpu_usage_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(home_context.status_bar_ram_usage_label, LV_GRID_ALIGN_CENTER, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(home_context.status_bar_wifi_icon, LV_GRID_ALIGN_END, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(home_context.status_bar_time_label, LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_cpu_usage_label,
+                         LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_ram_usage_label,
+                         LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_wifi_icon,
+                         LV_GRID_ALIGN_END, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_time_label,
+                         LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+}
+
+// 为主页信息区域提供统一的白色圆角卡片样式
+static void ui_home_style_card(lv_obj_t *card)
+{
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(card, lv_color_hex(HOME_UI_CARD_COLOR), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(HOME_UI_BORDER_COLOR), 0);
+    lv_obj_set_style_radius(card, 8, 0);
 }
 
 // 创建主页-时间和天气面板
 static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
 {
-    char time_str[6];
-    char date_str[32];
+    char time_str[6] = {0};
+    char date_str[32] = {0};
     time_service_datetime_t datetime = {0};
     time_service_get_datetime(&datetime); // 从RTC读取日期和时间
 
     home_context.datetime_weather = lv_obj_create(parent);
-    lv_obj_set_style_pad_left(home_context.datetime_weather, 25, 0);
-    lv_obj_set_style_pad_right(home_context.datetime_weather, 25, 0);
-    lv_obj_clear_flag(home_context.datetime_weather, LV_OBJ_FLAG_SCROLLABLE);
+    ui_home_style_card(home_context.datetime_weather);
+    lv_obj_set_style_pad_all(home_context.datetime_weather, 0, 0);
 
-    home_context.tw_time_label = lv_label_create(home_context.datetime_weather);
+    home_context.time_group = lv_obj_create(home_context.datetime_weather);
+    lv_obj_clear_flag(home_context.time_group, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(home_context.time_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(home_context.time_group, 0, 0);
+    lv_obj_set_style_pad_left(home_context.time_group, 32, 0);
+    lv_obj_set_style_pad_right(home_context.time_group, 12, 0);
+    lv_obj_set_style_pad_ver(home_context.time_group, 0, 0);
+    lv_obj_set_style_pad_row(home_context.time_group, 0, 0);
+    lv_obj_set_flex_flow(home_context.time_group, LV_FLEX_FLOW_COLUMN);
+    /* 时间、日期以及上下留白采用等间距分布，避免文字集中在卡片中央。 */
+    lv_obj_set_flex_align(home_context.time_group,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER);
+
+    home_context.tw_time_label = lv_label_create(home_context.time_group);
     lv_obj_set_style_text_font(home_context.tw_time_label, &ui_font_chinese_72_4, 0);
-    lv_obj_set_style_text_color(home_context.tw_time_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.tw_time_label,
+                                lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
     time_str[5] = 0; // 结束符
     ui_home_format_time(time_str, datetime.hour, datetime.minute); // 格式化时间，例如: "23:09"
     lv_label_set_text(home_context.tw_time_label, time_str);
 
-    home_context.tw_weather_icon = lv_img_create(home_context.datetime_weather);
-    lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(99U)); // 默认显示未知图标N/A
-    lv_obj_center(home_context.tw_weather_icon);
-
-    home_context.tw_date_label = lv_label_create(home_context.datetime_weather);
+    home_context.tw_date_label = lv_label_create(home_context.time_group);
     lv_obj_set_style_text_font(home_context.tw_date_label, &ui_font_chinese_24_4, 0);
-    lv_obj_set_style_text_color(home_context.tw_date_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.tw_date_label,
+                                lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
     ui_home_format_date(date_str, datetime.month, datetime.day, datetime.weekday); // 格式化日期，例如："9月22日 周二"
     lv_label_set_text(home_context.tw_date_label, date_str);
 
-    home_context.tw_temperature_label = lv_label_create(home_context.datetime_weather);
+    home_context.datetime_divider = lv_obj_create(home_context.datetime_weather);
+    lv_obj_clear_flag(home_context.datetime_divider, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(home_context.datetime_divider, 1, lv_pct(68));
+    lv_obj_set_style_bg_color(home_context.datetime_divider,
+                              lv_color_hex(HOME_UI_BORDER_COLOR), 0);
+    lv_obj_set_style_bg_opa(home_context.datetime_divider, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(home_context.datetime_divider, 0, 0);
+    lv_obj_set_style_pad_all(home_context.datetime_divider, 0, 0);
+    lv_obj_set_style_radius(home_context.datetime_divider, 0, 0);
+
+    home_context.weather_group = lv_obj_create(home_context.datetime_weather);
+    lv_obj_clear_flag(home_context.weather_group, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(home_context.weather_group, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(home_context.weather_group, 0, 0);
+    lv_obj_set_style_pad_all(home_context.weather_group, 0, 0);
+    lv_obj_set_style_pad_row(home_context.weather_group, 0, 0);
+    lv_obj_set_flex_flow(home_context.weather_group, LV_FLEX_FLOW_COLUMN);
+    /* 天气图标、文字以及上下留白采用等间距分布，与左侧时间区域保持一致。 */
+    lv_obj_set_flex_align(home_context.weather_group,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    home_context.tw_weather_icon = lv_img_create(home_context.weather_group);
+    lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(99U)); // 默认显示未知图标N/A
+
+    home_context.tw_temperature_label = lv_label_create(home_context.weather_group);
     lv_obj_set_style_text_font(home_context.tw_temperature_label, &ui_font_chinese_24_4, 0);
-    lv_obj_set_style_text_color(home_context.tw_temperature_label, lv_palette_main(LV_PALETTE_BLUE), 0);
+    lv_obj_set_style_text_color(home_context.tw_temperature_label,
+                                lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
     lv_label_set_text(home_context.tw_temperature_label, "晴 16℃");
 
-    lv_obj_set_style_radius(home_context.datetime_weather, 0, 0);  // 设置圆角为0，变成矩形
-    static const lv_coord_t time_weather_grid_cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
-    static const lv_coord_t time_weather_grid_rows[] = { LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
+    /*
+     * 使用一张完整卡片承载时间和天气：左侧文字保持同一基线，右侧图标与温度上下居中。
+     * 中间的 1px 分隔线只负责建立视觉分区，避免两张独立卡片产生割裂感。
+     */
+    static const lv_coord_t time_weather_grid_cols[] = {
+        LV_GRID_FR(5), 1, LV_GRID_FR(3), LV_GRID_TEMPLATE_LAST
+    };
+    static const lv_coord_t time_weather_grid_rows[] = {
+        LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
+    };
     lv_obj_set_grid_dsc_array(home_context.datetime_weather, time_weather_grid_cols, time_weather_grid_rows);
-    lv_obj_set_style_grid_row_align(home_context.datetime_weather, LV_GRID_ALIGN_SPACE_BETWEEN, 0); // 均匀分布，首尾元素贴边，剩余空间在元素之间
-
-    lv_obj_set_grid_cell(home_context.tw_time_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(home_context.tw_weather_icon, LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-    lv_obj_set_grid_cell(home_context.tw_date_label, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 1, 1);
-    lv_obj_set_grid_cell(home_context.tw_temperature_label, LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_CENTER, 1, 1);
+    lv_obj_set_grid_cell(home_context.time_group,
+                         LV_GRID_ALIGN_STRETCH, 0, 1,
+                         LV_GRID_ALIGN_STRETCH, 0, 1);
+    lv_obj_set_grid_cell(home_context.datetime_divider,
+                         LV_GRID_ALIGN_CENTER, 1, 1,
+                         LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.weather_group,
+                         LV_GRID_ALIGN_STRETCH, 2, 1,
+                         LV_GRID_ALIGN_STRETCH, 0, 1);
 }
 
 // 创建主页-应用启动器
 static void ui_home_create_app_launcher(lv_obj_t *parent)
 {
     home_context.app_launcher = lv_obj_create(parent);
-    lv_obj_set_flex_flow(home_context.app_launcher, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(home_context.app_launcher, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_scrollbar_mode(home_context.app_launcher, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(home_context.app_launcher, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(home_context.app_launcher, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(home_context.app_launcher, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(home_context.app_launcher, 0, 0);
+    lv_obj_set_style_pad_all(home_context.app_launcher, 0, 0);
+    lv_obj_set_style_pad_gap(home_context.app_launcher, 8, 0);
+
+    /* 800×480 屏幕每行显示 6 个入口，第二行继续按从左到右的手机桌面顺序排列。 */
+    static const lv_coord_t app_grid_cols[] = {
+        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
+        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
+        LV_GRID_TEMPLATE_LAST
+    };
+    static const lv_coord_t app_grid_rows[] = {
+        LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
+    };
+    lv_obj_set_grid_dsc_array(home_context.app_launcher, app_grid_cols, app_grid_rows);
 
     lv_style_init(&home_context.style_btn_normal);
-    //lv_style_set_bg_opa(&home_context.style_btn_normal, LV_OPA_50);
+    /* 手机桌面式入口：网格单元只负责排列图标与名称，不承担点击。 */
+    lv_style_set_bg_opa(&home_context.style_btn_normal, LV_OPA_TRANSP);
+    lv_style_set_border_width(&home_context.style_btn_normal, 0);
+    lv_style_set_radius(&home_context.style_btn_normal, 12);
     lv_style_set_flex_flow(&home_context.style_btn_normal, LV_FLEX_FLOW_COLUMN);
-    lv_style_set_pad_top(&home_context.style_btn_normal, 17);
-    lv_style_set_pad_row(&home_context.style_btn_normal, 10); // 图标和文字之间的垂直间距
+    lv_style_set_pad_all(&home_context.style_btn_normal, 8);
+    lv_style_set_pad_row(&home_context.style_btn_normal, 6); // 图标和文字之间的垂直间距
     lv_style_set_layout(&home_context.style_btn_normal, LV_LAYOUT_FLEX); /* 设置 Flex 布局 */
-    lv_style_set_flex_main_place(&home_context.style_btn_normal, LV_FLEX_ALIGN_START);
-    lv_style_set_bg_color(&home_context.style_btn_normal, lv_color_hex(0x6495ED)); //矢车菊的蓝色
+    lv_style_set_flex_main_place(&home_context.style_btn_normal, LV_FLEX_ALIGN_CENTER);
+    lv_style_set_flex_cross_place(&home_context.style_btn_normal, LV_FLEX_ALIGN_CENTER);
 
     lv_style_init(&home_context.style_btn_pressed);
     lv_style_set_bg_opa(&home_context.style_btn_pressed, LV_OPA_COVER);
-    lv_style_set_bg_color(&home_context.style_btn_pressed, lv_color_hex(0x557FC8));
+    lv_style_set_bg_color(&home_context.style_btn_pressed, lv_color_hex(HOME_UI_PRESSED_COLOR));
+    lv_style_set_border_color(&home_context.style_btn_pressed,
+                              lv_color_hex(HOME_UI_PRIMARY_BLUE));
+
+    lv_style_init(&home_context.style_btn_disabled);
+    lv_style_set_bg_opa(&home_context.style_btn_disabled, LV_OPA_COVER);
+    lv_style_set_bg_color(&home_context.style_btn_disabled,
+                          lv_color_hex(HOME_UI_CARD_COLOR));
+    lv_style_set_border_color(&home_context.style_btn_disabled,
+                              lv_color_hex(HOME_UI_BORDER_COLOR));
 
     //****************************************************************************
     home_context.app_items[APP_UART_TERMINAL].button = lv_btn_create(home_context.app_launcher);
@@ -371,6 +509,79 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     lv_obj_set_style_text_font(home_context.app_items[APP_CALENDAR].button_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.app_items[APP_CALENDAR].button_label, lv_color_hex(0xFFFFFF), 0);
     lv_label_set_text(home_context.app_items[APP_CALENDAR].button_label, "日    历");
+
+    /*
+     * 在所有对象创建完成后统一应用网格位置和状态样式。
+     * 这样新增应用时只需补充描述表和对象，不会遗漏文字颜色、按下反馈或禁用状态。
+     */
+    for (uint32_t app_id = 0; app_id < APP_COUNT; app_id++)
+    {
+        ui_home_app_item_t *item = &home_context.app_items[app_id];
+        const ui_home_app_descriptor_t *descriptor = &app_descriptors[app_id];
+
+        /* 外层网格对象只负责布局，清除点击能力，避免用户点到图标外部时误打开应用。 */
+        lv_obj_remove_style_all(item->button);
+        lv_obj_add_style(item->button, &home_context.style_btn_normal, 0);
+        lv_obj_clear_flag(item->button, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_event_cb(item->button, ui_home_app_click_event_cb);
+        lv_obj_set_grid_cell(item->button,
+                             LV_GRID_ALIGN_STRETCH, descriptor->grid_column, 1,
+                             LV_GRID_ALIGN_STRETCH, descriptor->grid_row, 1);
+
+        /* 白色圆角小框既是图标背景，也是该应用唯一的触摸热区。 */
+        lv_obj_set_size(item->button_icon, 72, 72);
+        lv_obj_clear_flag(item->button_icon, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_set_style_bg_color(item->button_icon, lv_color_hex(HOME_UI_CARD_COLOR), 0);
+        lv_obj_set_style_bg_opa(item->button_icon, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(item->button_icon, 1, 0);
+        lv_obj_set_style_border_color(item->button_icon,
+                                      lv_color_hex(HOME_UI_BORDER_COLOR), 0);
+        lv_obj_set_style_radius(item->button_icon, 16, 0);
+        lv_obj_set_style_shadow_width(item->button_icon, 6, 0);
+        lv_obj_set_style_shadow_opa(item->button_icon, LV_OPA_10, 0);
+        lv_obj_add_style(item->button_icon,
+                         &home_context.style_btn_pressed, LV_STATE_PRESSED);
+        lv_obj_add_style(item->button_icon,
+                         &home_context.style_btn_disabled, LV_STATE_DISABLED);
+
+        lv_label_set_text(item->button_label, descriptor->name);
+        lv_obj_set_width(item->button_label, lv_pct(100));
+        lv_obj_clear_flag(item->button_label, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_text_align(item->button_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(item->button_label,
+                                    lv_color_hex(descriptor->enabled
+                                                     ? HOME_UI_TEXT_COLOR
+                                                     : HOME_UI_DISABLED_TEXT),
+                                    0);
+
+#ifdef APP_USE_TEXT
+        lv_label_set_text(item->button_icon_label, descriptor->fallback_icon);
+        lv_obj_set_style_text_color(item->button_icon_label,
+                                    lv_color_hex(descriptor->enabled
+                                                     ? 0x2563A6
+                                                     : HOME_UI_DISABLED_TEXT),
+                                    0);
+#else
+        lv_img_set_src(item->button_icon_img, descriptor->icon);
+        lv_obj_set_style_img_opa(item->button_icon_img,
+                                 descriptor->enabled ? LV_OPA_COVER : LV_OPA_50,
+                                 0);
+#endif
+
+        if (!descriptor->enabled)
+        {
+            lv_obj_clear_flag(item->button_icon, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_state(item->button_icon, LV_STATE_DISABLED);
+        }
+        else
+        {
+            lv_obj_add_flag(item->button_icon, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(item->button_icon,
+                                ui_home_app_click_event_cb,
+                                LV_EVENT_CLICKED,
+                                NULL);
+        }
+    }
 }
 
 static void ui_home_app_click_event_cb(lv_event_t *event)
@@ -383,20 +594,19 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
         return;
     }
 
-    if ((target == home_context.app_items[APP_UART_TERMINAL].button) || (target == home_context.app_items[APP_UART_TERMINAL].button_icon)) // 打开串口调试助手
+    if (target == home_context.app_items[APP_UART_TERMINAL].button_icon) // 打开串口调试助手
     {
         ui_uart_terminal_create(lv_scr_act());
     }
-    else if ((target == home_context.app_items[APP_FILE_MANAGER].button) || (target == home_context.app_items[APP_FILE_MANAGER].button_icon))
+    else if (target == home_context.app_items[APP_FILE_MANAGER].button_icon)
     {
         ui_file_manager_create(lv_scr_act());
     }
-    else if ((target == home_context.app_items[APP_WEATHER].button) ||
-             (target == home_context.app_items[APP_WEATHER].button_icon))
+    else if (target == home_context.app_items[APP_WEATHER].button_icon)
     {
         ui_weather_create(lv_scr_act());
     }
-    else if ((target == home_context.app_items[APP_CALENDAR].button) || (target == home_context.app_items[APP_CALENDAR].button_icon)) // 打开日历
+    else if (target == home_context.app_items[APP_CALENDAR].button_icon) // 打开日历
     {
         ui_calendar_create(lv_scr_act());
     }
@@ -484,21 +694,23 @@ static lv_obj_t *ui_home_create_root(lv_obj_t *parent)
 {
     lv_obj_t *root = lv_obj_create(parent);
     lv_obj_set_size(root, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_pad_gap(root, 0, 0);  // 去掉容器与子项的外边距
-    lv_obj_set_style_pad_all(root, 0, 0);  // 一次性设置top/bottom/left/right四个方向为内边距为0
-    lv_obj_set_style_pad_right(root, 0, 0);
-    lv_obj_set_style_pad_left(root, 0, 0);
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(root, lv_color_hex(HOME_UI_BG_COLOR), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(root, 0, 0);
+    lv_obj_set_style_radius(root, 0, 0);
+    lv_obj_set_style_pad_all(root, 8, 0);
+    lv_obj_set_style_pad_gap(root, 8, 0);
     return root;
 }
 
 static void ui_home_configure_layout(void)
 {
-    //lv_obj_set_style_border_width(root, 0, 0);
-    //lv_obj_set_style_pad_all(root, 0, 0);
     static const lv_coord_t main_grid_cols[] = { LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
-    static const lv_coord_t main_grid_rows[] = { LV_GRID_FR(8), LV_GRID_FR(32), LV_GRID_FR(60), LV_GRID_TEMPLATE_LAST };
+    static const lv_coord_t main_grid_rows[] = {
+        42, 136, LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
+    };
     lv_obj_set_grid_dsc_array(home_context.root_obj, main_grid_cols, main_grid_rows);
-    lv_obj_set_style_grid_row_align(home_context.root_obj, LV_GRID_ALIGN_SPACE_BETWEEN, 0); // 均匀分布，首尾元素贴边，剩余空间在元素之间
     lv_obj_set_grid_cell(home_context.system_status_bar, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 1);
     lv_obj_set_grid_cell(home_context.datetime_weather, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 1, 1);
     lv_obj_set_grid_cell(home_context.app_launcher, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 2, 1);
@@ -506,17 +718,6 @@ static void ui_home_configure_layout(void)
 
 void ui_home_create(lv_obj_t* parent)
 {
-    // 是否有必要加这段代码？？
-    // char time_str[6] = {0};
-    // char date_str[32] = {0};
-    // // 从RTC读取日期和时间
-    // if (time_service_get_datetime(&datetime))
-    // {
-    //     // 把读取到的RTC时间，刷新显示到主界面
-    //     ui_home_format_time(time_str, datetime.hour, datetime.minute); // 格式化时间
-    //     ui_home_format_date(date_str, datetime.month, datetime.day, datetime.weekday); // 格式化日期
-    // }
-
     home_context.refresh_timer = lv_timer_create(ui_home_refresh_timer_cb, 1000, NULL); // 创建定时器，周期1秒
     home_context.root_obj = ui_home_create_root(parent);
     ui_home_create_status_bar(home_context.root_obj);              // 创建状态栏
