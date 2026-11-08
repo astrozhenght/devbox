@@ -397,35 +397,8 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
     }
     else if (huart == &huart6)
     {
-        switch (HAL_UARTEx_GetRxEventType(huart))
-        {
-            // 这里不需要关心中断标志位的清除，HAL_UART_IRQHandler()中已经处理
-            // 重新判断错误标志位，因为在执行中断函数期间，数据线接收到错误数据时，可能会引起错误标志位
-            case HAL_UART_RXEVENT_IDLE: // 从UART中断函数中可以看出，当接收类型为IDLE并且UART工作在DMA模式下，会执行到这个分支
-                bsp_wifi_copy_buffer_to_ring(Size); // 把接收到的数据放入环形缓冲区
-                bsp_wifi_set_rx_data_ready(1);
-#if 0
-                HAL_UARTEx_ReceiveToIdle_DMA(huart, msg, 100); // 重新启动DMA接收
-#else
-                DMA1_Stream2->CR &= ~DMA_SxCR_EN;                        // Disable the peripheral
-                DMA1_Stream2->CR &= (uint32_t)(~DMA_SxCR_DBM);           // Clear DBM bit
-                DMA1->LIFCR = 0x3F0000UL;                                // 清零数据流2中断标志
-                DMA1_Stream2->NDTR = WIFI_RX_BUFFER_SIZE;                // Configure DMA Stream data length
-                DMA1_Stream2->PAR = (uint32_t)&huart->Instance->RDR;     // Configure DMA Stream destination address
-                DMA1_Stream2->M0AR = (uint32_t)bsp_wifi_get_rx_buffer(); // Configure DMA Stream source address
-                DMA1_Stream2->CR |= DMA_SxCR_EN;                         // Enable the Peripheral
-#endif
-                break;
-            case HAL_UART_RXEVENT_HT:
-                // 处理半传输事件
-                break;
-            case HAL_UART_RXEVENT_TC: // DMA传输完成回调函数默认为UART_DMAReceiveCplt()函数，该函数中会调用HAL_UARTEx_RxEventCallback()函数
-                bsp_wifi_copy_buffer_to_ring(Size); // 把接收到的数据放入环形缓冲区
-                bsp_wifi_set_rx_data_ready(1);
-                break;
-            default:
-                break;
-        }
+        /* Circular DMA: copy only the new span for HT, TC and IDLE. */
+        bsp_wifi_on_rx_event(Size);
     }
 }
 
@@ -445,7 +418,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
     else if (huart->Instance == USART6)
     {
         // 在这里，ErrorCode还是有效值！执行完该函数，ReceptionType、Rxstate、ErrorCode都更新了
-        HAL_UARTEx_ReceiveToIdle_DMA(huart, bsp_wifi_get_rx_buffer(), WIFI_RX_BUFFER_SIZE); // 发生错误后重新开启接收
+        bsp_wifi_on_rx_error(); // 发生错误后重新开启接收
     }
 }
 

@@ -5,6 +5,7 @@
 #include "lvgl.h"
 #include "bsp_rtc.h"
 #include "wifi_service_port.h"
+#include "weather_service.h"
 
 #define UI_TASK_PRIORITY       3U       // 任务优先级
 #define UI_TASK_STACK_DEPTH    1280U    // 堆栈大小
@@ -15,6 +16,7 @@ static void ui_task_entry(void *pvParameters)
 {
     (void)pvParameters;
 
+    weather_service_init();
     if (!wifi_service_enqueue_command(WIFI_SERVICE_CMD_CONNECT))
     {
         while(1);
@@ -29,13 +31,10 @@ static void ui_task_entry(void *pvParameters)
         bsp_rtc_mark_init();
     }
 
-    if (!wifi_service_enqueue_command(WIFI_SERVICE_CMD_GET_WEATHER))
-    {
-        while(1);
-    }
-
     for (;;)
     {
+        wifi_service_dispatch_messages(lv_tick_get());
+        weather_service_poll(lv_tick_get());
         lv_task_handler(); // 处理与 lvgl 相关的任务
         vTaskDelay(pdMS_TO_TICKS(UI_TASK_PERIOD_MS));
     }

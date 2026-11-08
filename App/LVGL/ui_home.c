@@ -2,6 +2,8 @@
 #include <stdio.h>   // snprintf()、sprintf()
 #include "wifi_service_port.h"
 #include "ui_calendar.h"
+#include "ui_weather.h"
+#include "weather_service.h"
 #include "ui_uart_terminal.h"
 #include "ui_file_manager.h"
 #include "ui_images.h"
@@ -389,6 +391,11 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     {
         ui_file_manager_create(lv_scr_act());
     }
+    else if ((target == home_context.app_items[APP_WEATHER].button) ||
+             (target == home_context.app_items[APP_WEATHER].button_icon))
+    {
+        ui_weather_create(lv_scr_act());
+    }
     else if ((target == home_context.app_items[APP_CALENDAR].button) || (target == home_context.app_items[APP_CALENDAR].button_icon)) // 打开日历
     {
         ui_calendar_create(lv_scr_act());
@@ -404,11 +411,7 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t)
     static uint8_t  last_time_day    = 0xFF;  // 日
     static uint8_t  last_time_hour   = 0xFF;  // 时
     static uint8_t  last_time_minute = 0xFF;  // 分
-    uint32_t text_len; // 天气字符串长度
-    uint32_t temp_len; // 温度字符串长度
-    uint8_t weather_str[64]; // 处理后的天气字符串，比如："小雨 16℃"
     time_service_datetime_t datetime = {0};
-    wifi_service_message_t response = {0};
 
     if (time_service_get_datetime(&datetime)) // 从RTC读取日期和时间
     {
@@ -435,16 +438,6 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t)
                 last_time_year = datetime.year;
             }
 
-            // 向队列发送命令，周期请求更新天气
-            if ((datetime.minute % WEATHER_REFRESH_PERIOD_MINUTES) == 0)
-            {
-                if (wifi_service_enqueue_command(WIFI_SERVICE_CMD_GET_WEATHER) == false)
-                {
-                    // printf("队列发送失败\r\n");
-                    // 队列繁忙，下一个周期重新请求
-                }
-            }
-
             // 向队列发送命令，0点0分请求同步SNTP时间
             if ((datetime.hour == 0) && (datetime.minute == 0))
             {
@@ -457,55 +450,21 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t)
         }
     }
 
-    if (wifi_service_receive_message(&response) == true)
+    static uint32_t weather_version = UINT32_MAX;
+    const weather_snapshot_t *weather = weather_service_get_snapshot();
+    if (weather_version != weather->version)
     {
-        if (response.status != WIFI_SERVICE_STATUS_OK)
+        weather_version = weather->version;
+        if (weather->current_valid)
         {
-            /* 显示对应错误 */
-            return;
+            lv_label_set_text_fmt(home_context.tw_temperature_label, "%s %d\xE2\x84\x83",
+                weather->current.text, weather->current.temperature);
+            lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(weather->current.code));
         }
-
-        switch (response.command)
-        {
-            case WIFI_SERVICE_CMD_GET_WEATHER: // 已成功获取天气，更新天气图标和对应文字
-                // 更新天气数据，拼接字符串形式为"小雨 16℃"，然后显示到屏幕上
-                #if 0
-                text_len = strlen(response.data.weather.text);
-                temp_len = strlen(response.data.weather.temperature);
-                memcpy(weather_str, response.data.weather.text, text_len);
-                weather_str[text_len] = ' ';
-                memcpy(&weather_str[text_len + 1], response.data.weather.temperature, temp_len);
-                weather_str[text_len + temp_len + 1] = 0xE2;
-                weather_str[text_len + temp_len + 2] = 0x84;
-                weather_str[text_len + temp_len + 3] = 0x83; // ℃ UTF-8编码
-                weather_str[text_len + temp_len + 4] = 0;
-                #else
-                snprintf((char *)weather_str,
-                         sizeof(weather_str),
-                         "%s %d℃",
-                         response.data.weather.text,
-                         response.data.weather.temperature);
-                // weather_str[text_len + temp_len + 4] = 0;
-                #endif
-                lv_label_set_text(home_context.tw_temperature_label, (const char *)weather_str);
-
-                // 更新天气图标
-                lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(response.data.weather.code));
-                break;
-            case WIFI_SERVICE_CMD_GET_SNTPTIME: // 已成功获取SNTP时间
-                if (time_service_parse_sntp_response(response.data.sntp_time, &datetime))
-                {
-                    // 校准RTC时间和日期
-                    if (time_service_set_datetime(&datetime) == false)
-                    {
-                        // 校准失败
-                    }
-                }
-                break;
-            default:
-                break;
-        }
+        lv_obj_set_style_text_color(home_context.status_bar_wifi_icon,
+            weather->connected ? lv_palette_main(LV_PALETTE_BLUE) : lv_color_hex(0xA5AFBC), 0);
     }
+
 }
 
 // 格式化日期，例如: "9月16日 周三"

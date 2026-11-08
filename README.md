@@ -10,7 +10,7 @@ DevBox 是一个基于 STM32H743 的嵌入式桌面终端项目，使用 FreeRTO
 - GT911 电容触摸输入
 - UART 串口调试终端
 - ESP8266 Wi-Fi 联网
-- 网络天气获取与显示
+- 天气 App：心知天气实况、3天预报、手动刷新，与主页共用天气快照
 - SNTP 网络时间同步和 RTC 时间维护
 - 日历界面
 - SD卡文件管理：目录浏览、真实创建时间、直属数量统计、文件和文件夹删除
@@ -133,6 +133,9 @@ Copy-Item App/Config/wifi_credentials.example.h App/Config/wifi_credentials.h
 | 串口终端 | `App/LVGL/ui_uart_terminal.c` | 串口收发与数据显示界面 |
 | 文件管理 | `App/LVGL/ui_file_manager.c` | SD卡浏览、统计与删除交互 |
 | 文件服务 | `App/Service/file_service.c` | 路径校验、分页、直属统计和逐层删除 |
+| 天气 App | `App/LVGL/ui_weather.c` | 当前天气、日夜预报、高低温和风况 |
+| 天气服务 | `App/Service/weather_service.c` | 统一快照、定时刷新、去重及分项错误状态 |
+| 心知天气解析 | `App/Service/weather_service_seniverse.c` | 免费实况及3天预报的有界解析 |
 | Wi-Fi 服务 | `App/Service/wifi_service_stm32.c` | Wi-Fi命令队列、天气与时间服务适配 |
 | LCD BSP | `BSP/Src/bsp_lcd.c` | LCD 面板与帧缓冲操作 |
 | 触摸 BSP | `BSP/Src/bsp_touch.c` | GT911 初始化和触摸数据读取 |
@@ -151,6 +154,16 @@ Copy-Item App/Config/wifi_credentials.example.h App/Config/wifi_credentials.h
 - 业务流程放在 `App/Service`，避免在 UI 中直接调用 HAL。
 - 第三方源码集中放在 `ThirdParty`，非必要不直接修改。
 - 编译产物、IDE 用户文件和真实凭据不提交到仓库。
+
+## 天气 App
+
+点击桌面的天气图标打开。默认城市为苏州，可在 `App/Config/weather_config.h` 配置地点和刷新周期。
+实况每20分钟、预报每60分钟更新；手动刷新合并重复请求，失败时保留上次数据并显示错误。
+密钥继续填写在本地 `wifi_credentials.h` 的 `APP_WEATHER_API_KEY` 中。
+
+网络默认使用 ESP8266 SSL 443连接，不自动降级到明文HTTP。当前板上 Non-OS AT 1.7.1 已验证可用，
+连接初始化包含 `AT+CIPSSLSIZE=4096` 的握手缓冲设置。其他固件应核对相应AT命令支持情况。
+生活指数属于后续阶段，当前界面只显示实况及今天起共3天预报。
 
 ## 注意事项
 

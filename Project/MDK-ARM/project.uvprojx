@@ -404,6 +404,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\ui_calendar.c</FilePath>
             </File>
+            <File>
+              <FileName>ui_weather.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\ui_weather.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -748,6 +753,21 @@
               <FileName>wifi_service_stm32.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\wifi_service_stm32.c</FilePath>
+            </File>
+            <File>
+              <FileName>weather_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\weather_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>weather_service_seniverse.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\weather_service_seniverse.c</FilePath>
+            </File>
+            <File>
+              <FileName>weather_http.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\weather_http.c</FilePath>
             </File>
           </Files>
         </Group>

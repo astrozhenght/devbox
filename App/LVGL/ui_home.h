@@ -7,7 +7,6 @@
 extern "C" {
 #endif
 
-#define WEATHER_REFRESH_PERIOD_MINUTES    20  // 更新天气的周期，单位：分钟
 
 #define ColorLightCyan      (0xE1FFFF)  // 淡青色
 #define ColorMediumPurple   (0x9370DB)  // 适中的紫色
