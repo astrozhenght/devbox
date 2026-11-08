@@ -16,6 +16,7 @@ LV_IMG_DECLARE(ui_img_icon_setting);
 LV_IMG_DECLARE(ui_img_icon_uart);
 LV_IMG_DECLARE(ui_img_icon_weather);
 LV_IMG_DECLARE(ui_img_icon_calendar);
+LV_IMG_DECLARE(ui_img_icon_calculator);
 
 /**
  * @brief Get the image descriptor for a weather condition code.

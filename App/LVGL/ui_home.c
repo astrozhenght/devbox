@@ -6,6 +6,7 @@
 #include "weather_service.h"
 #include "ui_uart_terminal.h"
 #include "ui_file_manager.h"
+#include "ui_calculator.h"
 #include "ui_images.h"
 #include "ui_fonts.h"
 
@@ -27,6 +28,7 @@ typedef enum
     APP_DAPLINK,
     APP_WEATHER,
     APP_CALENDAR,
+    APP_CALCULATOR,
     APP_COUNT
 } ui_home_app_id_t;
 
@@ -48,11 +50,12 @@ static const ui_home_app_descriptor_t app_descriptors[APP_COUNT] =
 {
     [APP_UART_TERMINAL] = {"串口助手",     "UART",  &ui_img_icon_uart,     true,  0, 0},
     [APP_FILE_MANAGER]  = {"文件管理",     "FILE",  &ui_img_icon_folder48, true,  1, 0},
-    [APP_SETTINGS]      = {"设置",         "SET",   &ui_img_icon_setting,  false, 4, 0},
-    [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    false, 5, 0},
-    [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_debug,    false, 0, 1},
+    [APP_SETTINGS]      = {"设置",         "SET",   &ui_img_icon_setting,  false, 5, 0},
+    [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    false, 0, 1},
+    [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_debug,    false, 1, 1},
     [APP_WEATHER]       = {"天气",         "WEA",   &ui_img_icon_weather,  true,  2, 0},
     [APP_CALENDAR]      = {"日历",         "CAL",   &ui_img_icon_calendar, true,  3, 0},
+    [APP_CALCULATOR]    = {"计算器",       "CALC",  &ui_img_icon_calculator, true, 4, 0},
 };
 
 typedef struct
@@ -510,6 +513,32 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     lv_obj_set_style_text_color(home_context.app_items[APP_CALENDAR].button_label, lv_color_hex(0xFFFFFF), 0);
     lv_label_set_text(home_context.app_items[APP_CALENDAR].button_label, "日    历");
 
+    home_context.app_items[APP_CALCULATOR].button = lv_btn_create(home_context.app_launcher);
+    lv_obj_set_size(home_context.app_items[APP_CALCULATOR].button, 200, 123);
+    lv_obj_clear_flag(home_context.app_items[APP_CALCULATOR].button, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_style(home_context.app_items[APP_CALCULATOR].button,
+                     &home_context.style_btn_normal, 0);
+    home_context.app_items[APP_CALCULATOR].button_icon = lv_obj_create(
+        home_context.app_items[APP_CALCULATOR].button);
+    lv_obj_set_style_pad_all(home_context.app_items[APP_CALCULATOR].button_icon, 0, 0);
+#ifdef APP_USE_TEXT
+    home_context.app_items[APP_CALCULATOR].button_icon_label = lv_label_create(
+        home_context.app_items[APP_CALCULATOR].button_icon);
+    lv_obj_set_style_text_font(home_context.app_items[APP_CALCULATOR].button_icon_label,
+                               &ui_font_chinese_24_4, 0);
+    lv_obj_center(home_context.app_items[APP_CALCULATOR].button_icon_label);
+#else
+    home_context.app_items[APP_CALCULATOR].button_icon_img = lv_img_create(
+        home_context.app_items[APP_CALCULATOR].button_icon);
+    lv_img_set_src(home_context.app_items[APP_CALCULATOR].button_icon_img,
+                   &ui_img_icon_calculator);
+    lv_obj_center(home_context.app_items[APP_CALCULATOR].button_icon_img);
+#endif
+    home_context.app_items[APP_CALCULATOR].button_label = lv_label_create(
+        home_context.app_items[APP_CALCULATOR].button);
+    lv_obj_set_style_text_font(home_context.app_items[APP_CALCULATOR].button_label,
+                               &ui_font_chinese_24_4, 0);
+
     /*
      * 在所有对象创建完成后统一应用网格位置和状态样式。
      * 这样新增应用时只需补充描述表和对象，不会遗漏文字颜色、按下反馈或禁用状态。
@@ -562,10 +591,19 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
                                                      : HOME_UI_DISABLED_TEXT),
                                     0);
 #else
-        lv_img_set_src(item->button_icon_img, descriptor->icon);
-        lv_obj_set_style_img_opa(item->button_icon_img,
-                                 descriptor->enabled ? LV_OPA_COVER : LV_OPA_50,
-                                 0);
+        if (descriptor->icon != NULL)
+        {
+            lv_img_set_src(item->button_icon_img, descriptor->icon);
+            lv_obj_set_style_img_opa(item->button_icon_img,
+                                     descriptor->enabled ? LV_OPA_COVER : LV_OPA_50,
+                                     0);
+        }
+        else
+        {
+            lv_label_set_text(item->button_icon_label, descriptor->fallback_icon);
+            lv_obj_set_style_text_color(item->button_icon_label,
+                                        lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
+        }
 #endif
 
         if (!descriptor->enabled)
@@ -609,6 +647,10 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     else if (target == home_context.app_items[APP_CALENDAR].button_icon) // 打开日历
     {
         ui_calendar_create(lv_scr_act());
+    }
+    else if (target == home_context.app_items[APP_CALCULATOR].button_icon)
+    {
+        ui_calculator_create(lv_scr_act());
     }
 }
 

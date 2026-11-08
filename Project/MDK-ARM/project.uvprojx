@@ -409,6 +409,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\ui_weather.c</FilePath>
             </File>
+            <File>
+              <FileName>ui_calculator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\ui_calculator.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -478,6 +483,11 @@
               <FileName>ui_img_icon_calendar.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_calendar.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_img_icon_calculator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_calculator.c</FilePath>
             </File>
             <File>
               <FileName>ui_img_icon_debug.c</FileName>
@@ -768,6 +778,11 @@
               <FileName>weather_http.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\weather_http.c</FilePath>
+            </File>
+            <File>
+              <FileName>calculator_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\calculator_service.c</FilePath>
             </File>
           </Files>
         </Group>
