@@ -148,29 +148,31 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     lv_obj_set_style_text_font(home_context.status_bar_cpu_usage_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_cpu_usage_label,
                                 lv_color_hex(HOME_UI_MUTED_COLOR), 0);
+    /* C比中文标题少2px左侧字形留白，整组右移后按可见笔画对齐。 */
+    lv_obj_set_style_translate_x(home_context.status_bar_cpu_usage_label, 2, 0);
     lv_label_set_text(home_context.status_bar_cpu_usage_label, "CPU:--%");
 
     home_context.status_bar_cpu_ram_divider =
         ui_home_create_status_divider(home_context.system_status_bar);
-    lv_obj_set_style_translate_x(home_context.status_bar_cpu_ram_divider, -12, 0);
+    lv_obj_set_style_translate_x(home_context.status_bar_cpu_ram_divider, -10, 0);
 
     home_context.status_bar_ram_usage_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_ram_usage_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_ram_usage_label,
                                 lv_color_hex(HOME_UI_MUTED_COLOR), 0);
-    lv_obj_set_style_translate_x(home_context.status_bar_ram_usage_label, -12, 0);
+    lv_obj_set_style_translate_x(home_context.status_bar_ram_usage_label, -10, 0);
     lv_label_set_text(home_context.status_bar_ram_usage_label, "RAM:--%");
 
     home_context.status_bar_ram_fps_divider =
         ui_home_create_status_divider(home_context.system_status_bar);
-    lv_obj_set_style_translate_x(home_context.status_bar_ram_fps_divider, -12, 0);
+    lv_obj_set_style_translate_x(home_context.status_bar_ram_fps_divider, -10, 0);
 
     home_context.status_bar_fps_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_fps_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_fps_label,
                                 lv_color_hex(HOME_UI_MUTED_COLOR), 0);
-    /* RAM侧整体左移12px，FPS再保留此前的12px左移量。 */
-    lv_obj_set_style_translate_x(home_context.status_bar_fps_label, -24, 0);
+    /* FPS保留相对整组额外左移12px的视觉调整。 */
+    lv_obj_set_style_translate_x(home_context.status_bar_fps_label, -22, 0);
     lv_label_set_text(home_context.status_bar_fps_label, "FPS:--");
 
     home_context.status_bar_wifi_icon = lv_label_create(home_context.system_status_bar);

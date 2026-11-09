@@ -196,10 +196,20 @@ void ui_weather_create(lv_obj_t *parent)
     lv_obj_t *current=panel(weather_ui.root,true);
     lv_obj_set_grid_cell(current,LV_GRID_ALIGN_STRETCH,0,1,LV_GRID_ALIGN_STRETCH,1,1);
     weather_ui.icon=lv_img_create(current);image(weather_ui.icon,99,64);lv_obj_align(weather_ui.icon,LV_ALIGN_LEFT_MID,4,0);
-    weather_ui.city=label(current,WEATHER_CITY_NAME,CURRENT_ACCENT);lv_obj_set_pos(weather_ui.city,86,0);lv_obj_set_width(weather_ui.city,150);
-    weather_ui.temperature=label(current,"当前 —℃",CURRENT_ACCENT);lv_obj_set_pos(weather_ui.temperature,86,34);lv_obj_set_width(weather_ui.temperature,150);
-    weather_ui.text=label(current,"天气待更新",TEXT);lv_obj_set_pos(weather_ui.text,260,0);lv_obj_set_width(weather_ui.text,490);
-    weather_ui.updated=label(current,"数据更新 —",MUTED);lv_obj_set_pos(weather_ui.updated,260,40);lv_obj_set_width(weather_ui.updated,490);
+    /* 两组信息分别纵向均分，顶部、标签间和底部留白保持一致。 */
+    lv_obj_t *current_left=panel(current,false);
+    lv_obj_set_pos(current_left,86,0);lv_obj_set_size(current_left,150,lv_pct(100));
+    lv_obj_set_flex_flow(current_left,LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(current_left,LV_FLEX_ALIGN_SPACE_EVENLY,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
+    weather_ui.city=label(current_left,WEATHER_CITY_NAME,CURRENT_ACCENT);lv_obj_set_width(weather_ui.city,150);
+    weather_ui.temperature=label(current_left,"当前 —℃",CURRENT_ACCENT);lv_obj_set_width(weather_ui.temperature,150);
+
+    lv_obj_t *current_right=panel(current,false);
+    lv_obj_set_pos(current_right,260,0);lv_obj_set_size(current_right,490,lv_pct(100));
+    lv_obj_set_flex_flow(current_right,LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(current_right,LV_FLEX_ALIGN_SPACE_EVENLY,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
+    weather_ui.text=label(current_right,"天气待更新",TEXT);lv_obj_set_width(weather_ui.text,490);
+    weather_ui.updated=label(current_right,"数据更新 —",MUTED);lv_obj_set_width(weather_ui.updated,490);
     lv_obj_t *forecast=panel(weather_ui.root,false);
     lv_obj_set_grid_cell(forecast,LV_GRID_ALIGN_STRETCH,0,1,LV_GRID_ALIGN_STRETCH,2,1);
     static const lv_coord_t day_cols[]={LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_FR(1),LV_GRID_TEMPLATE_LAST};
