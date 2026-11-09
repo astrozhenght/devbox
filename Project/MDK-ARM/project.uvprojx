@@ -784,6 +784,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\calculator_service.c</FilePath>
             </File>
+            <File>
+              <FileName>system_monitor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\system_monitor.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -938,6 +943,11 @@
               <FileName>platform_mcu.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Platform\MCU\User\Src\platform_mcu.c</FilePath>
+            </File>
+            <File>
+              <FileName>runtime_stats.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\MCU\User\Src\runtime_stats.c</FilePath>
             </File>
             <File>
               <FileName>qspi.c</FileName>

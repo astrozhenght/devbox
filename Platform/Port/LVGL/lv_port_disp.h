@@ -44,6 +44,9 @@ void disp_enable_update(void);
  */
 void disp_disable_update(void);
 
+/* 返回已在垂直消隐期完成显存切换的累计帧数。 */
+uint32_t lv_port_disp_get_frame_count(void);
+
 /**********************
  *      MACROS
  **********************/

@@ -6,6 +6,7 @@
 #include "bsp_rtc.h"
 #include "wifi_service_port.h"
 #include "weather_service.h"
+#include "system_monitor.h"
 
 #define UI_TASK_PRIORITY       3U       // 任务优先级
 #define UI_TASK_STACK_DEPTH    1280U    // 堆栈大小
@@ -17,6 +18,8 @@ static void ui_task_entry(void *pvParameters)
     (void)pvParameters;
 
     weather_service_init();
+    /* 调度器启动后建立首个基线，使主页 1 秒后即可显示有效数据。 */
+    system_monitor_sample(lv_tick_get());
     if (!wifi_service_enqueue_command(WIFI_SERVICE_CMD_CONNECT))
     {
         while(1);

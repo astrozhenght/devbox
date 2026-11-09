@@ -57,6 +57,7 @@ static lv_disp_draw_buf_t display_draw_buffer;
 static lv_color_t * const framebuffer_0 = (lv_color_t *)DISPLAY_FRAMEBUFFER_0_ADDR;
 static lv_color_t * const framebuffer_1 = (lv_color_t *)DISPLAY_FRAMEBUFFER_1_ADDR;
 static lv_disp_drv_t * volatile pending_flush_driver;
+static volatile uint32_t displayed_frame_count;
 
 /**********************
  *      MACROS
@@ -144,6 +145,11 @@ void disp_disable_update(void)
     disp_flush_enabled = false;
 }
 
+uint32_t lv_port_disp_get_frame_count(void)
+{
+    return displayed_frame_count;
+}
+
 /*Flush the content of the internal buffer the specific area on the display
  *You can use DMA or any hardware acceleration to do this operation in the background but
  *'lv_disp_flush_ready()' has to be called when finished.*/
@@ -192,6 +198,8 @@ void HAL_LTDC_ReloadEventCallback(LTDC_HandleTypeDef *ltdc_handle)
 
     if (completed_driver != NULL)
     {
+        /* 只统计硬件真正完成的换帧，提交失败的帧不计入 FPS。 */
+        displayed_frame_count++;
         lv_disp_flush_ready(completed_driver);
     }
 }

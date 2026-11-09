@@ -45,6 +45,7 @@
 
 /* USER CODE BEGIN Includes */
 /* Section where include file can be added */
+#include "runtime_stats.h"
 /* USER CODE END Includes */
 
 /* Ensure definitions are only used by the compiler, and not by the assembler. */
@@ -71,6 +72,7 @@
 #define configTOTAL_HEAP_SIZE                    ((size_t)15360) // 15KB
 #define configMAX_TASK_NAME_LEN                  ( 16 )
 #define configUSE_TRACE_FACILITY                 1
+#define configGENERATE_RUN_TIME_STATS            1
 #define configUSE_16_BIT_TICKS                   0
 #define configUSE_MUTEXES                        1
 #define configQUEUE_REGISTRY_SIZE                8
@@ -115,6 +117,7 @@ to exclude the API function. */
 #define INCLUDE_xQueueGetMutexHolder         1
 #define INCLUDE_uxTaskGetStackHighWaterMark  1
 #define INCLUDE_xTaskGetCurrentTaskHandle    1
+#define INCLUDE_xTaskGetIdleTaskHandle       1
 #define INCLUDE_eTaskGetState                1
 
 /*
@@ -165,6 +168,8 @@ standard names. */
 
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()  platform_runtime_stats_init()
+#define portGET_RUN_TIME_COUNTER_VALUE()          platform_runtime_stats_get_counter()
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

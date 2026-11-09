@@ -7,6 +7,7 @@
 #include "ui_uart_terminal.h"
 #include "ui_file_manager.h"
 #include "ui_calculator.h"
+#include "system_monitor.h"
 #include "ui_images.h"
 #include "ui_fonts.h"
 
@@ -74,7 +75,10 @@ typedef struct
     lv_obj_t* datetime_weather;           // 二级时间和天气面板
     lv_obj_t* app_launcher;               // 二级应用启动器
     lv_obj_t* status_bar_cpu_usage_label; // 三级
+    lv_obj_t* status_bar_cpu_ram_divider; // CPU与RAM分隔线
     lv_obj_t* status_bar_ram_usage_label; // 三级
+    lv_obj_t* status_bar_ram_fps_divider; // RAM与FPS分隔线
+    lv_obj_t* status_bar_fps_label;       // 三级
     lv_obj_t* status_bar_wifi_icon;       // 三级
     lv_obj_t* status_bar_time_label;      // 三级
     lv_obj_t* time_group;                 // 左侧时间和日期信息组
@@ -101,8 +105,26 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t);
 static void ui_home_format_date(char* out, uint8_t month, uint8_t date, uint8_t weekday);
 static void ui_home_format_time(char* out, uint8_t hour, uint8_t minute);
 static lv_obj_t *ui_home_create_root(lv_obj_t *parent);
+static lv_obj_t *ui_home_create_status_divider(lv_obj_t *parent);
 static void ui_home_configure_layout(void);
 static void ui_home_style_card(lv_obj_t *card);
+static void ui_home_update_system_monitor(void);
+
+static lv_obj_t *ui_home_create_status_divider(lv_obj_t *parent)
+{
+    lv_obj_t *divider = lv_obj_create(parent);
+
+    /* 分隔线与24px文字等高，适度加粗以保证在LCD上清晰可见。 */
+    lv_obj_set_size(divider, 2, 24);
+    lv_obj_clear_flag(divider, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(divider, lv_color_hex(HOME_UI_MUTED_COLOR), 0);
+    lv_obj_set_style_bg_opa(divider, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(divider, 0, 0);
+    lv_obj_set_style_radius(divider, 1, 0);
+    lv_obj_set_style_pad_all(divider, 0, 0);
+
+    return divider;
+}
 
 // 创建主页-状态栏
 static void ui_home_create_status_bar(lv_obj_t *parent)
@@ -116,21 +138,40 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(home_context.system_status_bar, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(home_context.system_status_bar, 0, 0);
     lv_obj_set_style_radius(home_context.system_status_bar, 0, 0);
-    lv_obj_set_style_pad_hor(home_context.system_status_bar, 12, 0);
+    /* 左侧与各App标题统一从屏幕18px处起始，右侧间距保持不变。 */
+    lv_obj_set_style_pad_left(home_context.system_status_bar, 10, 0);
+    lv_obj_set_style_pad_right(home_context.system_status_bar, 12, 0);
     lv_obj_set_style_pad_ver(home_context.system_status_bar, 0, 0);
-    lv_obj_set_style_pad_column(home_context.system_status_bar, 18, 0);
+    lv_obj_set_style_pad_column(home_context.system_status_bar, 6, 0);
 
     home_context.status_bar_cpu_usage_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_cpu_usage_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_cpu_usage_label,
                                 lv_color_hex(HOME_UI_MUTED_COLOR), 0);
-    lv_label_set_text(home_context.status_bar_cpu_usage_label, "CPU:27%");
+    lv_label_set_text(home_context.status_bar_cpu_usage_label, "CPU:--%");
+
+    home_context.status_bar_cpu_ram_divider =
+        ui_home_create_status_divider(home_context.system_status_bar);
+    lv_obj_set_style_translate_x(home_context.status_bar_cpu_ram_divider, -12, 0);
 
     home_context.status_bar_ram_usage_label = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_ram_usage_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_ram_usage_label,
                                 lv_color_hex(HOME_UI_MUTED_COLOR), 0);
-    lv_label_set_text(home_context.status_bar_ram_usage_label, "RAM:27%");
+    lv_obj_set_style_translate_x(home_context.status_bar_ram_usage_label, -12, 0);
+    lv_label_set_text(home_context.status_bar_ram_usage_label, "RAM:--%");
+
+    home_context.status_bar_ram_fps_divider =
+        ui_home_create_status_divider(home_context.system_status_bar);
+    lv_obj_set_style_translate_x(home_context.status_bar_ram_fps_divider, -12, 0);
+
+    home_context.status_bar_fps_label = lv_label_create(home_context.system_status_bar);
+    lv_obj_set_style_text_font(home_context.status_bar_fps_label, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_text_color(home_context.status_bar_fps_label,
+                                lv_color_hex(HOME_UI_MUTED_COLOR), 0);
+    /* RAM侧整体左移12px，FPS再保留此前的12px左移量。 */
+    lv_obj_set_style_translate_x(home_context.status_bar_fps_label, -24, 0);
+    lv_label_set_text(home_context.status_bar_fps_label, "FPS:--");
 
     home_context.status_bar_wifi_icon = lv_label_create(home_context.system_status_bar);
     lv_obj_set_style_text_font(home_context.status_bar_wifi_icon, &lv_font_montserrat_22, 0);
@@ -145,9 +186,9 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     time_str[5] = '\0'; // 手动补上结束符
     lv_label_set_text(home_context.status_bar_time_label, time_str); // 把读取到的RTC时间，刷新显示到主界面
 
-    /* 中间弹性列吸收剩余空间，保证 Wi-Fi 和时间始终贴近右侧且不会跳动。 */
+    /* 三个指标占用相同宽度，使两条分隔线左右间距完全一致。 */
     static const lv_coord_t status_grid_cols[] = {
-        LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_FR(1),
+        96, 2, 96, 2, 96, LV_GRID_FR(1),
         LV_GRID_CONTENT, LV_GRID_CONTENT,
         LV_GRID_TEMPLATE_LAST
     };
@@ -155,12 +196,18 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     lv_obj_set_grid_dsc_array(home_context.system_status_bar, status_grid_cols, status_grid_rows);
     lv_obj_set_grid_cell(home_context.status_bar_cpu_usage_label,
                          LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_cpu_ram_divider,
+                         LV_GRID_ALIGN_CENTER, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
     lv_obj_set_grid_cell(home_context.status_bar_ram_usage_label,
-                         LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+                         LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_ram_fps_divider,
+                         LV_GRID_ALIGN_CENTER, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    lv_obj_set_grid_cell(home_context.status_bar_fps_label,
+                         LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
     lv_obj_set_grid_cell(home_context.status_bar_wifi_icon,
-                         LV_GRID_ALIGN_END, 3, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+                         LV_GRID_ALIGN_END, 6, 1, LV_GRID_ALIGN_CENTER, 0, 1);
     lv_obj_set_grid_cell(home_context.status_bar_time_label,
-                         LV_GRID_ALIGN_END, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+                         LV_GRID_ALIGN_END, 7, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 }
 
 // 为主页信息区域提供统一的白色圆角卡片样式
@@ -654,10 +701,30 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     }
 }
 
+static void ui_home_update_system_monitor(void)
+{
+    const system_monitor_snapshot_t *snapshot;
+
+    system_monitor_sample(lv_tick_get());
+    snapshot = system_monitor_get_snapshot();
+    if (!snapshot->valid)
+    {
+        return;
+    }
+
+    lv_label_set_text_fmt(home_context.status_bar_cpu_usage_label,
+                          "CPU:%u%%", snapshot->cpu_usage_percent);
+    lv_label_set_text_fmt(home_context.status_bar_ram_usage_label,
+                          "RAM:%u%%", snapshot->ram_usage_percent);
+    lv_label_set_text_fmt(home_context.status_bar_fps_label,
+                          "FPS:%u", snapshot->fps);
+}
+
 // 定时调度入口，定时器1s
 static void ui_home_refresh_timer_cb(lv_timer_t* t)
 {
     LV_UNUSED(t);
+    ui_home_update_system_monitor();
     static uint32_t last_time_year   = 0xFF;  // 年
     static uint8_t  last_time_month  = 0xFF;  // 月
     static uint8_t  last_time_day    = 0xFF;  // 日
@@ -760,6 +827,7 @@ static void ui_home_configure_layout(void)
 
 void ui_home_create(lv_obj_t* parent)
 {
+    system_monitor_init();
     home_context.refresh_timer = lv_timer_create(ui_home_refresh_timer_cb, 1000, NULL); // 创建定时器，周期1秒
     home_context.root_obj = ui_home_create_root(parent);
     ui_home_create_status_bar(home_context.root_obj);              // 创建状态栏
