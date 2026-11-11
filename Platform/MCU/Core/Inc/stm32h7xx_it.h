@@ -62,6 +62,9 @@ void DMA1_Stream3_IRQHandler(void);
 void LTDC_IRQHandler(void);
 void USART1_IRQHandler(void);
 void USART6_IRQHandler(void);
+void OTG_FS_EP1_OUT_IRQHandler(void);
+void OTG_FS_EP1_IN_IRQHandler(void);
+void OTG_FS_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

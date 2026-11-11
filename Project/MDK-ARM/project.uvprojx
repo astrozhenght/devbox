@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,USE_FULL_LL_DRIVER,STM32H743xx</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\App\Config;..\..\App\LVGL;..\..\App\LVGL\assets\fonts;..\..\App\LVGL\assets\images;..\..\App\Service;..\..\App\Tasks;..\..\BSP\Inc;..\..\Common\Inc;..\..\Platform\MCU\Core\Inc;..\..\Platform\MCU\User\Inc;..\..\Platform\Port\FatFS;..\..\Platform\Port\FreeRTOS;..\..\Platform\Port\LVGL;..\..\ThirdParty\cJSON;..\..\ThirdParty\FatFS\source;..\..\ThirdParty\FreeRTOS\Source\include;..\..\ThirdParty\LVGL\src\core;..\..\ThirdParty\LVGL\src\draw;..\..\ThirdParty\LVGL\src\extra;..\..\ThirdParty\LVGL\src\font;..\..\ThirdParty\LVGL\src\hal;..\..\ThirdParty\LVGL\src\misc;..\..\ThirdParty\LVGL\src\widgets;..\..\ThirdParty\LVGL\src\;..\..\ThirdParty\LVGL\;..\..\ThirdParty\ST\CMSIS\Device\ST\STM32H7xx\Include;..\..\ThirdParty\ST\CMSIS\Include;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc\Legacy;..\..\ThirdParty\FreeRTOS\Source\portable\RVDS\ARM_CM4F</IncludePath>
+              <IncludePath>..\..\App\Config;..\..\App\LVGL;..\..\App\LVGL\assets\fonts;..\..\App\LVGL\assets\images;..\..\App\Service;..\..\App\Tasks;..\..\BSP\Inc;..\..\Common\Inc;..\..\Platform\MCU\Core\Inc;..\..\Platform\MCU\User\Inc;..\..\Platform\Port\CMSIS-DAP;..\..\Platform\Port\FatFS;..\..\Platform\Port\FreeRTOS;..\..\Platform\Port\LVGL;..\..\Platform\Port\USB;..\..\ThirdParty\cJSON;..\..\ThirdParty\CMSIS-DAP\Firmware\Include;..\..\ThirdParty\FatFS\source;..\..\ThirdParty\FreeRTOS\Source\include;..\..\ThirdParty\LVGL\src\core;..\..\ThirdParty\LVGL\src\draw;..\..\ThirdParty\LVGL\src\extra;..\..\ThirdParty\LVGL\src\font;..\..\ThirdParty\LVGL\src\hal;..\..\ThirdParty\LVGL\src\misc;..\..\ThirdParty\LVGL\src\widgets;..\..\ThirdParty\LVGL\src\;..\..\ThirdParty\LVGL\;..\..\ThirdParty\STM32_USB_Device_Library\Core\Inc;..\..\ThirdParty\ST\CMSIS\Device\ST\STM32H7xx\Include;..\..\ThirdParty\ST\CMSIS\Include;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc;..\..\ThirdParty\ST\STM32H7xx_HAL_Driver\Inc\Legacy;..\..\ThirdParty\FreeRTOS\Source\portable\RVDS\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -413,6 +413,11 @@
               <FileName>ui_calculator.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\ui_calculator.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_daplink.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\ui_daplink.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -789,6 +794,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\system_monitor.c</FilePath>
             </File>
+            <File>
+              <FileName>dap_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\dap_service.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -813,6 +823,11 @@
               <FileName>wifi_task.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\Tasks\wifi_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>dap_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Tasks\dap_task.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -853,6 +868,11 @@
               <FileName>bsp_wifi.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\BSP\Src\bsp_wifi.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_dap.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\Src\bsp_dap.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -1033,6 +1053,66 @@
               <FileName>sd_diskio_dma.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Platform\Port\FatFS\sd_diskio_dma.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Platform/Port/USB</GroupName>
+          <Files>
+            <File>
+              <FileName>usbd_conf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\Port\USB\usbd_conf.c</FilePath>
+            </File>
+            <File>
+              <FileName>usbd_desc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\Port\USB\usbd_desc.c</FilePath>
+            </File>
+            <File>
+              <FileName>usbd_dap.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\Port\USB\usbd_dap.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>ThirdParty/STM32 USB Device</GroupName>
+          <Files>
+            <File>
+              <FileName>usbd_core.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\STM32_USB_Device_Library\Core\Src\usbd_core.c</FilePath>
+            </File>
+            <File>
+              <FileName>usbd_ctlreq.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\STM32_USB_Device_Library\Core\Src\usbd_ctlreq.c</FilePath>
+            </File>
+            <File>
+              <FileName>usbd_ioreq.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\STM32_USB_Device_Library\Core\Src\usbd_ioreq.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>ThirdParty/CMSIS-DAP</GroupName>
+          <Files>
+            <File>
+              <FileName>DAP.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\CMSIS-DAP\Firmware\Source\DAP.c</FilePath>
+            </File>
+            <File>
+              <FileName>DAP_vendor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\CMSIS-DAP\Firmware\Source\DAP_vendor.c</FilePath>
+            </File>
+            <File>
+              <FileName>SW_DP.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\ThirdParty\CMSIS-DAP\Firmware\Source\SW_DP.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -74,6 +74,7 @@ extern DMA_HandleTypeDef  hdma_usart6_rx;
 extern DMA_HandleTypeDef  hdma_usart6_tx;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart6;
+extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 
 /* FreeRTOS tick timer interrupt handler prototype */
@@ -356,6 +357,21 @@ void DMA2D_IRQHandler(void)
         /* Clear the transfer complete flag */
         DMA2D->IFCR = DMA2D_FLAG_TC;
     }
+}
+
+void OTG_FS_EP1_OUT_IRQHandler(void)
+{
+    HAL_PCD_IRQHandler(&hpcd_USB_OTG_FS);
+}
+
+void OTG_FS_EP1_IN_IRQHandler(void)
+{
+    HAL_PCD_IRQHandler(&hpcd_USB_OTG_FS);
+}
+
+void OTG_FS_IRQHandler(void)
+{
+    HAL_PCD_IRQHandler(&hpcd_USB_OTG_FS);
 }
 
 // 由于此回调函数既包含uart1(uart app)，也包含uart6(wifi)，因此没有选择放在uart_service.c/bsp_wifi.c中，而是选择放此文件中

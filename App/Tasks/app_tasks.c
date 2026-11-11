@@ -3,10 +3,16 @@
 #include "wifi_task.h"
 #include "wifi_service_port.h"
 #include "file_task.h"
+#include "dap_task.h"
 
 bool app_tasks_create(void)
 {
     if (!file_task_create())
+    {
+        return false;
+    }
+
+    if (!dap_task_create())
     {
         return false;
     }
