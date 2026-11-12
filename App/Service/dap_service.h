@@ -16,6 +16,7 @@ typedef struct
     bool initialized;          /* DAP 服务及 USB 设备是否初始化完成。 */
     bool usb_configured;       /* 主机是否已经完成 USB 枚举和配置。 */
     bool command_active;       /* 命令正在执行或等待响应入队。 */
+    bool local_active;         /* 本地FLM烧录器正在独占DAP引擎。 */
     bool dpidr_valid;          /* 是否已从正常 DP 读取响应中取得 DPIDR。 */
     uint8_t debug_port;        /* 当前调试端口，0=未连接，1=SWD。 */
     uint8_t last_command;      /* 最近收到的 CMSIS-DAP 命令编号。 */
@@ -33,6 +34,8 @@ typedef struct
 bool dap_service_init(void);
 void dap_service_process(TickType_t timeout);
 bool dap_service_get_status(dap_service_status_t *status);
+void dap_service_set_local_active(bool active);
+void dap_service_flush_requests(void);
 
 #ifdef __cplusplus
 }

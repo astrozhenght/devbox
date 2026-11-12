@@ -42,7 +42,7 @@
 # Local tests
 /Tests/
 
-# Documentation: keep only the architecture document
+# Documentation: keep only explicitly versioned project documents
 /Docs/*
 !/Docs/PROJECT_ARCHITECTURE_V2.1.md
 

@@ -799,6 +799,31 @@
               <FileType>1</FileType>
               <FilePath>..\..\App\Service\dap_service.c</FilePath>
             </File>
+            <File>
+              <FileName>dap_programmer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\dap_programmer.c</FilePath>
+            </File>
+            <File>
+              <FileName>firmware_reader.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\firmware_reader.c</FilePath>
+            </File>
+            <File>
+              <FileName>flm_parser.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\flm_parser.c</FilePath>
+            </File>
+            <File>
+              <FileName>flm_executor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\flm_executor.c</FilePath>
+            </File>
+            <File>
+              <FileName>target_profile.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\Service\target_profile.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1113,6 +1138,11 @@
               <FileName>SW_DP.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\ThirdParty\CMSIS-DAP\Firmware\Source\SW_DP.c</FilePath>
+            </File>
+            <File>
+              <FileName>swd_target.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\Platform\Port\CMSIS-DAP\swd_target.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -35,6 +35,7 @@ typedef struct
     lv_obj_t *previous;     /* 上一页按钮。 */
     lv_obj_t *next;         /* 下一页按钮。 */
     lv_obj_t *remove;       /* 删除选中项的按钮。 */
+    lv_obj_t *choose;       /* 选择模式下确认选中文件的按钮。 */
     lv_obj_t *close;        /* 关闭文件管理并返回主页的按钮。 */
     lv_obj_t *rows[FILE_SERVICE_PAGE_SIZE];    /* 当前页各条目的可点击行，未使用的行隐藏。 */
     lv_obj_t *icons[FILE_SERVICE_PAGE_SIZE];   /* 各行的文件夹或普通文件图片。 */
@@ -46,6 +47,9 @@ typedef struct
     file_service_entry_t entries[FILE_SERVICE_PAGE_SIZE]; /* 当前页条目元数据，与行数组下标对应。 */
     char path[FILE_SERVICE_PATH_CAP];        /* 当前浏览或请求的目录完整路径，以空字符结束。 */
     char delete_path[FILE_SERVICE_PATH_CAP]; /* 待确认或已提交删除的目标完整路径，以空字符结束。 */
+    char extension[16];     /* 选择模式允许的扩展名，以|分隔；空字符串表示不过滤。 */
+    ui_file_picker_callback_t picker_callback;
+    void *picker_user;
     uint32_t request_id;    /* 当前请求编号，用于过滤旧请求的结果。 */
     uint32_t page;          /* 当前页码，从0开始。 */
     uint32_t count;         /* 当前页已接收的条目数。 */
@@ -58,6 +62,7 @@ typedef struct
     bool has_next;          /* PAGE事件报告后面还有可见条目。 */
     bool suppress_click;    /* 长按后忽略下一次点击。 */
     bool retry_media;       /* 介质未就绪后安排自动重试读取；不用于自动重试删除。 */
+    bool picker_mode;       /* true表示只选择文件，不允许删除。 */
 } ui_file_manager_context_t;
 
 static ui_file_manager_context_t manager __attribute__((section(".axisram")));
@@ -76,6 +81,43 @@ static bool styles_ready;
 
 static void request_page(const char *path, uint32_t page, bool background);
 static void button_event(lv_event_t *event);
+
+static bool entry_selectable(int32_t index)
+{
+    const char *name;
+    size_t name_length;
+    const char *extension;
+
+    if ((index < 0) || ((uint32_t)index >= manager.count) ||
+        manager.entries[index].is_directory) return false;
+    if (manager.extension[0] == '\0') return true;
+    name = manager.entries[index].name;
+    name_length = strlen(name);
+    extension = manager.extension;
+    while (*extension != '\0')
+    {
+        const char *separator = strchr(extension, '|');
+        size_t extension_length = (separator != NULL) ?
+                                  (size_t)(separator - extension) : strlen(extension);
+        if (name_length >= extension_length)
+        {
+            size_t offset = name_length - extension_length;
+            size_t i;
+            for (i = 0U; i < extension_length; i++)
+            {
+                char left = name[offset + i];
+                char right = extension[i];
+                if ((left >= 'A') && (left <= 'Z')) left = (char)(left - 'A' + 'a');
+                if ((right >= 'A') && (right <= 'Z')) right = (char)(right - 'A' + 'a');
+                if (left != right) break;
+            }
+            if (i == extension_length) return true;
+        }
+        if (separator == NULL) break;
+        extension = separator + 1U;
+    }
+    return false;
+}
 
 static void init_styles(void)
 {
@@ -180,7 +222,10 @@ static void update_controls(void)
     set_disabled(manager.refresh, manager.deleting);
     set_disabled(manager.previous, manager.deleting || manager.page == 0U);
     set_disabled(manager.next, manager.busy || !manager.has_next);
-    set_disabled(manager.remove, manager.busy || manager.selected < 0);
+    if (manager.remove != NULL)
+        set_disabled(manager.remove, manager.busy || manager.selected < 0);
+    if (manager.choose != NULL)
+        set_disabled(manager.choose, manager.busy || !entry_selectable(manager.selected));
     set_disabled(manager.close, manager.deleting);
 }
 
@@ -319,7 +364,7 @@ static void row_event(lv_event_t *event)
     {
         show_selected((int32_t)index);
         manager.suppress_click = true;
-        confirm_delete();
+        if (!manager.picker_mode) confirm_delete();
         return;
     }
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -353,6 +398,18 @@ static void button_event(lv_event_t *event)
     else if (target == manager.previous && manager.page > 0U) request_page(manager.path, manager.page - 1U, false);
     else if (target == manager.next && manager.has_next) request_page(manager.path, manager.page + 1U, false);
     else if (target == manager.remove) confirm_delete();
+    else if ((target == manager.choose) && entry_selectable(manager.selected))
+    {
+        char selected_path[FILE_SERVICE_PATH_CAP];
+        if (file_service_join_path(manager.path, manager.entries[manager.selected].name,
+                                   selected_path, sizeof(selected_path)) == FILE_SERVICE_OK)
+        {
+            ui_file_picker_callback_t callback = manager.picker_callback;
+            void *user = manager.picker_user;
+            if (callback != NULL) callback(selected_path, user);
+            lv_obj_del(manager.root);
+        }
+    }
     else if (target == manager.up)
     {
         char path[FILE_SERVICE_PATH_CAP];
@@ -505,7 +562,10 @@ static lv_obj_t *make_cell(lv_obj_t *parent, uint32_t column, const char *text)
     return label;
 }
 
-void ui_file_manager_create(lv_obj_t *parent)
+static void ui_file_manager_create_internal(lv_obj_t *parent, const char *start_path,
+                                            const char *extension,
+                                            ui_file_picker_callback_t callback,
+                                            void *user)
 {
     if (manager.root != NULL)
     {
@@ -514,6 +574,14 @@ void ui_file_manager_create(lv_obj_t *parent)
     }
     memset(&manager, 0, sizeof(manager));
     manager.selected = -1;
+    manager.picker_mode = callback != NULL;
+    manager.picker_callback = callback;
+    manager.picker_user = user;
+    if (extension != NULL)
+    {
+        strncpy(manager.extension, extension, sizeof(manager.extension) - 1U);
+        manager.extension[sizeof(manager.extension) - 1U] = '\0';
+    }
     init_styles();
     manager.root = lv_obj_create(parent);
     lv_obj_set_size(manager.root, lv_pct(100), lv_pct(92));
@@ -536,7 +604,7 @@ void ui_file_manager_create(lv_obj_t *parent)
     lv_obj_set_flex_flow(toolbar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     manager.title_label = lv_label_create(toolbar);
-    lv_label_set_text(manager.title_label, "文件管理器");
+    lv_label_set_text(manager.title_label, manager.picker_mode ? "选择文件" : "文件管理器");
     lv_obj_set_style_text_color(manager.title_label, lv_palette_main(LV_PALETTE_PINK), 0);
     lv_obj_t *spacer = make_panel(toolbar);
     lv_obj_set_size(spacer, 0, 1);
@@ -656,12 +724,35 @@ void ui_file_manager_create(lv_obj_t *parent)
     lv_obj_set_style_text_align(manager.page_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(manager.page_label, LV_LABEL_LONG_DOT);
     manager.next = make_button(footer, "下一页", 94);
-    manager.remove = make_button(footer, "删除", 78);
-    lv_obj_set_style_bg_color(manager.remove, lv_color_hex(0xFFF4F5), 0);
-    lv_obj_set_style_border_color(manager.remove, lv_color_hex(0xF1C8CE), 0);
-    lv_obj_set_style_text_color(manager.remove, lv_color_hex(0xD94757), 0);
-    lv_obj_set_style_bg_color(manager.remove, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
-    lv_obj_set_style_text_color(manager.remove, lv_color_white(), LV_STATE_PRESSED);
+    if (manager.picker_mode)
+    {
+        manager.choose = make_button(footer, "选择", 78);
+        lv_obj_set_style_bg_color(manager.choose, lv_color_hex(0xEAF5FF), 0);
+        lv_obj_set_style_border_color(manager.choose, lv_color_hex(0x90CAF9), 0);
+        lv_obj_set_style_text_color(manager.choose, lv_color_hex(0x1565C0), 0);
+    }
+    else
+    {
+        manager.remove = make_button(footer, "删除", 78);
+        lv_obj_set_style_bg_color(manager.remove, lv_color_hex(0xFFF4F5), 0);
+        lv_obj_set_style_border_color(manager.remove, lv_color_hex(0xF1C8CE), 0);
+        lv_obj_set_style_text_color(manager.remove, lv_color_hex(0xD94757), 0);
+        lv_obj_set_style_bg_color(manager.remove, lv_palette_main(LV_PALETTE_RED), LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(manager.remove, lv_color_white(), LV_STATE_PRESSED);
+    }
     manager.timer = lv_timer_create(poll_results, 50U, NULL);
-    request_page(FILE_SERVICE_ROOT, 0U, false);
+    request_page((start_path != NULL) ? start_path : FILE_SERVICE_ROOT, 0U, false);
+}
+
+void ui_file_manager_create(lv_obj_t *parent)
+{
+    ui_file_manager_create_internal(parent, FILE_SERVICE_ROOT, NULL, NULL, NULL);
+}
+
+void ui_file_manager_create_picker(lv_obj_t *parent, const char *start_path,
+                                   const char *extension,
+                                   ui_file_picker_callback_t callback,
+                                   void *user)
+{
+    ui_file_manager_create_internal(parent, start_path, extension, callback, user);
 }

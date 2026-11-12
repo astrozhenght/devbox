@@ -3,6 +3,8 @@
 
 #include "file_service.h"
 
+#include "FreeRTOS.h"
+
 /* 文件任务对外接口：由UI单一提交者发起异步请求，通过结果队列接收事件。 */
 
 /**
@@ -70,5 +72,13 @@ bool file_task_receive(file_service_event_t *event);
  * Context: 任务上下文，不可在中断中调用，使用短临界区更新有效编号。
  */
 void file_task_cancel(uint32_t request_id);
+
+/* 本地烧录器使用的同步只读流。所有FatFS操作仍由文件任务串行执行。 */
+file_service_status_t file_task_stream_open(const char *path, uint32_t *size_bytes,
+                                            TickType_t timeout);
+file_service_status_t file_task_stream_read(void *buffer, size_t capacity,
+                                            size_t *read_bytes, TickType_t timeout);
+file_service_status_t file_task_stream_seek(uint32_t offset, TickType_t timeout);
+file_service_status_t file_task_stream_close(TickType_t timeout);
 
 #endif

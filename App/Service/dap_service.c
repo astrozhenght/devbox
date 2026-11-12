@@ -434,3 +434,26 @@ bool dap_service_get_status(dap_service_status_t *status)
 
     return true;
 }
+
+void dap_service_set_local_active(bool active)
+{
+    taskENTER_CRITICAL();
+    dap_status.local_active = active;
+    dap_status.command_active = false;
+    taskEXIT_CRITICAL();
+}
+
+void dap_service_flush_requests(void)
+{
+    uint32_t request_length;
+
+    while (usbd_dap_receive(dap_request, sizeof(dap_request), &request_length, 0U))
+    {
+        taskENTER_CRITICAL();
+        dap_status.failure_count++;
+        dap_status.communication_bytes += request_length;
+        taskEXIT_CRITICAL();
+    }
+    /* 丢弃队列时一并清除对应通知计数，避免退出本地模式后空唤醒。 */
+    (void)ulTaskNotifyTake(pdTRUE, 0U);
+}

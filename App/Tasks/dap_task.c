@@ -2,9 +2,10 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "dap_programmer.h"
 #include "dap_service.h"
 
-#define DAP_TASK_STACK_DEPTH 768U
+#define DAP_TASK_STACK_DEPTH 1536U
 #define DAP_TASK_PRIORITY    (tskIDLE_PRIORITY + 3U)
 #define DAP_TASK_RAM         __attribute__((section(".axisram"), aligned(8)))
 
@@ -19,10 +20,12 @@ static void dap_task_entry(void *argument)
     {
         vTaskDelete(NULL);
     }
+    dap_programmer_init();
 
     for (;;)
     {
-        dap_service_process(portMAX_DELAY);
+        if (!dap_programmer_process())
+            dap_service_process(pdMS_TO_TICKS(10U));
     }
 }
 

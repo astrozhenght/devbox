@@ -1,4 +1,5 @@
 #include "file_task.h"
+#include "file_service_port.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -6,25 +7,48 @@
 
 #define FILE_TASK_STACK_DEPTH 1536U /* 栈深度以StackType_t元素为单位，不是字节数。 */
 #define FILE_TASK_PRIORITY    1U
+#define FILE_REQUEST_DEPTH    4U
 #define FILE_RESULT_DEPTH     4U
 #define FILE_TASK_RAM __attribute__((section(".axisram"), aligned(8)))
 
+typedef enum
+{
+    FILE_REQUEST_LIST,
+    FILE_REQUEST_DELETE,
+    FILE_REQUEST_STREAM_OPEN,
+    FILE_REQUEST_STREAM_READ,
+    FILE_REQUEST_STREAM_SEEK,
+    FILE_REQUEST_STREAM_CLOSE
+} file_request_kind_t;
+
 typedef struct
 {
-    uint32_t id, page; /* 请求编号及从0开始的页码；删除请求不使用页码。 */
-    bool deleting;    /* true表示删除，false表示目录读取。 */
+    file_request_kind_t kind;
+    uint32_t id, value;
+    void *buffer;
+    size_t capacity;
     char path[FILE_SERVICE_PATH_CAP]; /* 入队时复制路径，不持有调用方字符串。 */
 } file_request_t;
+
+typedef struct
+{
+    uint32_t id;
+    file_service_status_t status;
+    int32_t native_error;
+    uint32_t size_bytes;
+    size_t transferred;
+} file_stream_response_t;
 
 /* 队列及任务均静态分配，大缓冲区和任务栈放在AXI SRAM中。 */
 static StaticTask_t task_control;
 static FILE_TASK_RAM StackType_t task_stack[FILE_TASK_STACK_DEPTH];
-static StaticQueue_t request_control, result_control;
-static FILE_TASK_RAM uint8_t request_memory[sizeof(file_request_t)];
+static StaticQueue_t request_control, result_control, stream_result_control;
+static FILE_TASK_RAM uint8_t request_memory[FILE_REQUEST_DEPTH * sizeof(file_request_t)];
 static FILE_TASK_RAM uint8_t result_memory[FILE_RESULT_DEPTH * sizeof(file_service_event_t)];
+static FILE_TASK_RAM uint8_t stream_result_memory[sizeof(file_stream_response_t)];
 static FILE_TASK_RAM file_request_t request;
-static QueueHandle_t request_queue, result_queue;
-static uint32_t next_id;
+static QueueHandle_t request_queue, result_queue, stream_result_queue;
+static uint32_t next_id, stream_next_id;
 /* 仅该编号的结果可以继续投递；0表示当前没有需要接收结果的请求。 */
 static volatile uint32_t active_id;
 
@@ -65,14 +89,55 @@ static bool emit_result(const file_service_event_t *event, void *user)
  */
 static void file_task_entry(void *argument)
 {
+    file_stream_response_t response;
+
     (void)argument;
     for (;;)
     {
         if (xQueueReceive(request_queue, &request, portMAX_DELAY) != pdPASS) continue;
-        if (request.deleting)
-            file_service_delete(request.path, request.id, emit_result, NULL);
-        else if (request.id == active_id)
-            file_service_list(request.path, request.page, request.id, emit_result, NULL);
+        switch (request.kind)
+        {
+            case FILE_REQUEST_LIST:
+                if (request.id == active_id)
+                    file_service_list(request.path, request.value, request.id, emit_result, NULL);
+                break;
+            case FILE_REQUEST_DELETE:
+                file_service_delete(request.path, request.id, emit_result, NULL);
+                break;
+            case FILE_REQUEST_STREAM_OPEN:
+                memset(&response, 0, sizeof(response));
+                response.id = request.id;
+                response.status = file_port_mount();
+                if (response.status == FILE_SERVICE_OK)
+                    response.status = file_port_open_file(request.path, &response.size_bytes);
+                response.native_error = file_port_last_error();
+                (void)xQueueSend(stream_result_queue, &response, portMAX_DELAY);
+                break;
+            case FILE_REQUEST_STREAM_READ:
+                memset(&response, 0, sizeof(response));
+                response.id = request.id;
+                response.status = file_port_read_file(request.buffer, request.capacity,
+                                                       &response.transferred);
+                response.native_error = file_port_last_error();
+                (void)xQueueSend(stream_result_queue, &response, portMAX_DELAY);
+                break;
+            case FILE_REQUEST_STREAM_SEEK:
+                memset(&response, 0, sizeof(response));
+                response.id = request.id;
+                response.status = file_port_seek_file(request.value);
+                response.native_error = file_port_last_error();
+                (void)xQueueSend(stream_result_queue, &response, portMAX_DELAY);
+                break;
+            case FILE_REQUEST_STREAM_CLOSE:
+                memset(&response, 0, sizeof(response));
+                response.id = request.id;
+                response.status = file_port_close_file();
+                response.native_error = file_port_last_error();
+                (void)xQueueSend(stream_result_queue, &response, portMAX_DELAY);
+                break;
+            default:
+                break;
+        }
     }
 }
 
@@ -100,8 +165,8 @@ static bool submit(const char *path, uint32_t page, bool deleting, uint32_t *req
     next_id++;
     if (next_id == 0U) next_id++;
     message.id = next_id;
-    message.page = page;
-    message.deleting = deleting;
+    message.value = page;
+    message.kind = deleting ? FILE_REQUEST_DELETE : FILE_REQUEST_LIST;
     strcpy(message.path, path);
     taskENTER_CRITICAL();
     BaseType_t sent = xQueueSend(request_queue, &message, 0);
@@ -125,9 +190,12 @@ static bool submit(const char *path, uint32_t page, bool deleting, uint32_t *req
  */
 bool file_task_create(void)
 {
-    request_queue = xQueueCreateStatic(1U, sizeof(file_request_t), request_memory, &request_control);
+    request_queue = xQueueCreateStatic(FILE_REQUEST_DEPTH, sizeof(file_request_t),
+                                       request_memory, &request_control);
     result_queue = xQueueCreateStatic(FILE_RESULT_DEPTH, sizeof(file_service_event_t), result_memory, &result_control);
-    return request_queue != NULL && result_queue != NULL &&
+    stream_result_queue = xQueueCreateStatic(1U, sizeof(file_stream_response_t),
+                                             stream_result_memory, &stream_result_control);
+    return request_queue != NULL && result_queue != NULL && stream_result_queue != NULL &&
         xTaskCreateStatic(file_task_entry, "file_service", FILE_TASK_STACK_DEPTH,
                           NULL, FILE_TASK_PRIORITY, task_stack, &task_control) != NULL;
 }
@@ -198,4 +266,89 @@ void file_task_cancel(uint32_t id)
     taskENTER_CRITICAL();
     if (active_id == id) active_id = 0U;
     taskEXIT_CRITICAL();
+}
+
+static file_service_status_t stream_request(file_request_t *message,
+                                            file_stream_response_t *response,
+                                            TickType_t timeout)
+{
+    TickType_t start;
+    TickType_t remaining;
+
+    if ((message == NULL) || (response == NULL) || (request_queue == NULL) ||
+        (stream_result_queue == NULL)) return FILE_SERVICE_NOT_READY;
+    stream_next_id++;
+    if (stream_next_id == 0U) stream_next_id++;
+    message->id = stream_next_id;
+    start = xTaskGetTickCount();
+    if (xQueueSend(request_queue, message, timeout) != pdPASS) return FILE_SERVICE_IO_ERROR;
+    remaining = timeout;
+    for (;;)
+    {
+        if (xQueueReceive(stream_result_queue, response, remaining) != pdPASS)
+            return FILE_SERVICE_IO_ERROR;
+        if (response->id == message->id) return response->status;
+        if (timeout != portMAX_DELAY)
+        {
+            TickType_t elapsed = xTaskGetTickCount() - start;
+            if (elapsed >= timeout) return FILE_SERVICE_IO_ERROR;
+            remaining = timeout - elapsed;
+        }
+    }
+}
+
+file_service_status_t file_task_stream_open(const char *path, uint32_t *size_bytes,
+                                            TickType_t timeout)
+{
+    file_request_t message;
+    file_stream_response_t response;
+    file_service_status_t status;
+
+    if ((size_bytes == NULL) || !file_service_path_valid(path))
+        return FILE_SERVICE_INVALID_PATH;
+    memset(&message, 0, sizeof(message));
+    message.kind = FILE_REQUEST_STREAM_OPEN;
+    strcpy(message.path, path);
+    status = stream_request(&message, &response, timeout);
+    if (status == FILE_SERVICE_OK) *size_bytes = response.size_bytes;
+    return status;
+}
+
+file_service_status_t file_task_stream_read(void *buffer, size_t capacity,
+                                            size_t *read_bytes, TickType_t timeout)
+{
+    file_request_t message;
+    file_stream_response_t response;
+    file_service_status_t status;
+
+    if ((buffer == NULL) || (read_bytes == NULL) || (capacity == 0U))
+        return FILE_SERVICE_INVALID_PATH;
+    memset(&message, 0, sizeof(message));
+    message.kind = FILE_REQUEST_STREAM_READ;
+    message.buffer = buffer;
+    message.capacity = capacity;
+    status = stream_request(&message, &response, timeout);
+    if (status == FILE_SERVICE_OK) *read_bytes = response.transferred;
+    return status;
+}
+
+file_service_status_t file_task_stream_seek(uint32_t offset, TickType_t timeout)
+{
+    file_request_t message;
+    file_stream_response_t response;
+
+    memset(&message, 0, sizeof(message));
+    message.kind = FILE_REQUEST_STREAM_SEEK;
+    message.value = offset;
+    return stream_request(&message, &response, timeout);
+}
+
+file_service_status_t file_task_stream_close(TickType_t timeout)
+{
+    file_request_t message;
+    file_stream_response_t response;
+
+    memset(&message, 0, sizeof(message));
+    message.kind = FILE_REQUEST_STREAM_CLOSE;
+    return stream_request(&message, &response, timeout);
 }

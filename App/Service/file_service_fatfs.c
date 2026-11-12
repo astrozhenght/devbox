@@ -4,14 +4,16 @@
 #include "sd_diskio_dma.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include <limits.h>
 #include <string.h>
 
 /* FatFS端口共用工作区，仅由文件任务串行访问，不支持并发或回调重入。 */
 static FATFS filesystem __attribute__((section(".axisram"), aligned(32))); /* 卷挂载对象。 */
 static DIR directory __attribute__((section(".axisram"))); /* 唯一目录枚举句柄。 */
+static FIL file __attribute__((section(".axisram"))); /* 本地烧录使用的唯一只读文件句柄。 */
 static FILINFO info __attribute__((section(".axisram"))); /* 目录枚举和属性查询共用的元数据。 */
 /* linked: 驱动已注册到物理盘0；mounted: 最近挂载成功；directory_open: 枚举句柄已打开。 */
-static bool linked, mounted, directory_open;
+static bool linked, mounted, directory_open, file_open;
 static char drive_path[4]; /* ST驱动注册接口生成的数字盘符，例如"0:/"，包含结束符。 */
 static FRESULT last_error; /* 最近记录的FatFS错误，不会被普通操作成功自动清除。 */
 
@@ -207,6 +209,52 @@ file_service_status_t file_port_stat(const char *path, file_service_entry_t *ent
  * Return: 删除成功返回%FILE_SERVICE_OK，否则返回转换后的服务状态。
  */
 file_service_status_t file_port_remove(const char *path) { return translate(f_unlink(path)); }
+
+file_service_status_t file_port_open_file(const char *path, uint32_t *size_bytes)
+{
+    FRESULT result;
+
+    if ((path == NULL) || (size_bytes == NULL)) return FILE_SERVICE_INVALID_PATH;
+    if (file_open) return translate(FR_LOCKED);
+    result = f_open(&file, path, FA_READ | FA_OPEN_EXISTING);
+    if (result != FR_OK) return translate(result);
+    if (f_size(&file) > UINT32_MAX)
+    {
+        (void)f_close(&file);
+        return translate(FR_INVALID_OBJECT);
+    }
+    file_open = true;
+    *size_bytes = (uint32_t)f_size(&file);
+    return FILE_SERVICE_OK;
+}
+
+file_service_status_t file_port_read_file(void *buffer, size_t capacity, size_t *read_bytes)
+{
+    UINT amount;
+    FRESULT result;
+
+    if (!file_open || (buffer == NULL) || (read_bytes == NULL) || (capacity > UINT_MAX))
+        return FILE_SERVICE_INVALID_PATH;
+    result = f_read(&file, buffer, (UINT)capacity, &amount);
+    if (result == FR_OK) *read_bytes = amount;
+    return translate(result);
+}
+
+file_service_status_t file_port_seek_file(uint32_t offset)
+{
+    if (!file_open) return FILE_SERVICE_INVALID_PATH;
+    return translate(f_lseek(&file, offset));
+}
+
+file_service_status_t file_port_close_file(void)
+{
+    FRESULT result;
+
+    if (!file_open) return FILE_SERVICE_OK;
+    result = f_close(&file);
+    file_open = false;
+    return translate(result);
+}
 
 /**
  * file_port_last_error() - 获取端口最近记录的FatFS错误码
