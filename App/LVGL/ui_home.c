@@ -88,7 +88,8 @@ typedef struct
     lv_obj_t* tw_time_label;              // 三级
     lv_obj_t* tw_date_label;              // 三级
     lv_obj_t* tw_weather_icon;            // 三级
-    lv_obj_t* tw_temperature_label;       // 三级
+    lv_obj_t* tw_temperature_label;       // 当前温度数值
+    lv_obj_t* tw_weather_text_label;      // 当前天气现象
     lv_timer_t* refresh_timer;            // 定时器
     lv_style_t style_btn_normal;          // 样式，按钮正常样式
     lv_style_t style_btn_pressed;         // 样式，按钮按下样式
@@ -238,6 +239,10 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     char time_str[6] = {0};
     char date_str[32] = {0};
     time_service_datetime_t datetime = {0};
+    lv_obj_t *weather_icon_slot;
+    lv_obj_t *weather_info;
+    lv_obj_t *temperature_row;
+    lv_obj_t *temperature_unit;
     time_service_get_datetime(&datetime); // 从RTC读取日期和时间
 
     home_context.datetime_weather = lv_obj_create(parent);
@@ -251,11 +256,11 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     lv_obj_set_style_pad_left(home_context.time_group, 32, 0);
     lv_obj_set_style_pad_right(home_context.time_group, 12, 0);
     lv_obj_set_style_pad_ver(home_context.time_group, 0, 0);
-    lv_obj_set_style_pad_row(home_context.time_group, 0, 0);
+    lv_obj_set_style_pad_row(home_context.time_group, 8, 0);
     lv_obj_set_flex_flow(home_context.time_group, LV_FLEX_FLOW_COLUMN);
-    /* 时间、日期以及上下留白采用等间距分布，避免文字集中在卡片中央。 */
+    /* 时间与日期采用固定间距，日期长度变化时上下位置保持稳定。 */
     lv_obj_set_flex_align(home_context.time_group,
-                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER);
 
@@ -270,13 +275,13 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     home_context.tw_date_label = lv_label_create(home_context.time_group);
     lv_obj_set_style_text_font(home_context.tw_date_label, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.tw_date_label,
-                                lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
+                                lv_color_hex(HOME_UI_MUTED_COLOR), 0);
     ui_home_format_date(date_str, datetime.month, datetime.day, datetime.weekday); // 格式化日期，例如："9月22日 周二"
     lv_label_set_text(home_context.tw_date_label, date_str);
 
     home_context.datetime_divider = lv_obj_create(home_context.datetime_weather);
     lv_obj_clear_flag(home_context.datetime_divider, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(home_context.datetime_divider, 1, lv_pct(68));
+    lv_obj_set_size(home_context.datetime_divider, 1, 72);
     lv_obj_set_style_bg_color(home_context.datetime_divider,
                               lv_color_hex(HOME_UI_BORDER_COLOR), 0);
     lv_obj_set_style_bg_opa(home_context.datetime_divider, LV_OPA_COVER, 0);
@@ -289,29 +294,73 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(home_context.weather_group, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(home_context.weather_group, 0, 0);
     lv_obj_set_style_pad_all(home_context.weather_group, 0, 0);
-    lv_obj_set_style_pad_row(home_context.weather_group, 0, 0);
-    lv_obj_set_flex_flow(home_context.weather_group, LV_FLEX_FLOW_COLUMN);
-    /* 天气图标、文字以及上下留白采用等间距分布，与左侧时间区域保持一致。 */
+    lv_obj_set_style_pad_column(home_context.weather_group, 18, 0);
+    lv_obj_set_flex_flow(home_context.weather_group, LV_FLEX_FLOW_ROW);
+    /* 图标与天气信息横向排列，充分利用卡片宽度并强化信息层级。 */
     lv_obj_set_flex_align(home_context.weather_group,
-                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
 
-    home_context.tw_weather_icon = lv_img_create(home_context.weather_group);
+    /* 固定图标槽尺寸，避免不同天气图片尺寸造成文字位置跳动。 */
+    weather_icon_slot = lv_obj_create(home_context.weather_group);
+    lv_obj_clear_flag(weather_icon_slot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(weather_icon_slot, 72, 72);
+    lv_obj_set_style_bg_opa(weather_icon_slot, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(weather_icon_slot, 0, 0);
+    lv_obj_set_style_pad_all(weather_icon_slot, 0, 0);
+    home_context.tw_weather_icon = lv_img_create(weather_icon_slot);
     lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(99U)); // 默认显示未知图标N/A
+    lv_obj_center(home_context.tw_weather_icon);
 
-    home_context.tw_temperature_label = lv_label_create(home_context.weather_group);
-    lv_obj_set_style_text_font(home_context.tw_temperature_label, &ui_font_chinese_24_4, 0);
+    weather_info = lv_obj_create(home_context.weather_group);
+    lv_obj_clear_flag(weather_info, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(weather_info, 110, 82);
+    lv_obj_set_style_bg_opa(weather_info, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(weather_info, 0, 0);
+    lv_obj_set_style_pad_all(weather_info, 0, 0);
+    lv_obj_set_style_pad_row(weather_info, 4, 0);
+    lv_obj_set_flex_flow(weather_info, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(weather_info, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+
+    /* 温度数值和单位分开使用字体，既突出数值又确保“℃”字形完整。 */
+    temperature_row = lv_obj_create(weather_info);
+    lv_obj_clear_flag(temperature_row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(temperature_row, lv_pct(100), 42);
+    lv_obj_set_style_bg_opa(temperature_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(temperature_row, 0, 0);
+    lv_obj_set_style_pad_all(temperature_row, 0, 0);
+    lv_obj_set_style_pad_column(temperature_row, 2, 0);
+    lv_obj_set_flex_flow(temperature_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(temperature_row, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+
+    home_context.tw_temperature_label = lv_label_create(temperature_row);
+    lv_obj_set_style_text_font(home_context.tw_temperature_label, &ui_font_chinese_32_4, 0);
     lv_obj_set_style_text_color(home_context.tw_temperature_label,
                                 lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
-    lv_label_set_text(home_context.tw_temperature_label, "晴 16℃");
+    lv_label_set_text(home_context.tw_temperature_label, "16");
+
+    temperature_unit = lv_label_create(temperature_row);
+    lv_obj_set_style_text_font(temperature_unit, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_text_color(temperature_unit, lv_color_hex(HOME_UI_PRIMARY_BLUE), 0);
+    lv_label_set_text(temperature_unit, "℃");
+
+    home_context.tw_weather_text_label = lv_label_create(weather_info);
+    lv_obj_set_style_text_font(home_context.tw_weather_text_label, &ui_font_chinese_24_4, 0);
+    lv_obj_set_style_text_color(home_context.tw_weather_text_label,
+                                lv_color_hex(HOME_UI_MUTED_COLOR), 0);
+    lv_label_set_text(home_context.tw_weather_text_label, "晴");
+    lv_obj_set_width(home_context.tw_weather_text_label, lv_pct(100));
+    lv_label_set_long_mode(home_context.tw_weather_text_label, LV_LABEL_LONG_DOT);
 
     /*
-     * 使用一张完整卡片承载时间和天气：左侧文字保持同一基线，右侧图标与温度上下居中。
+     * 使用一张完整卡片承载时间和天气：左侧突出时间，右侧横向组合图标与天气信息。
      * 中间的 1px 分隔线只负责建立视觉分区，避免两张独立卡片产生割裂感。
      */
     static const lv_coord_t time_weather_grid_cols[] = {
-        LV_GRID_FR(5), 1, LV_GRID_FR(3), LV_GRID_TEMPLATE_LAST
+        LV_GRID_FR(5), 1, LV_GRID_FR(4), LV_GRID_TEMPLATE_LAST
     };
     static const lv_coord_t time_weather_grid_rows[] = {
         LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
@@ -791,8 +840,9 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t)
         weather_version = weather->version;
         if (weather->current_valid)
         {
-            lv_label_set_text_fmt(home_context.tw_temperature_label, "%s %d\xE2\x84\x83",
-                weather->current.text, weather->current.temperature);
+            lv_label_set_text_fmt(home_context.tw_temperature_label, "%d",
+                                  weather->current.temperature);
+            lv_label_set_text(home_context.tw_weather_text_label, weather->current.text);
             lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(weather->current.code));
         }
         lv_obj_set_style_text_color(home_context.status_bar_wifi_icon,
