@@ -1,5 +1,7 @@
 #include "weather_service_seniverse.h"
 #include "cJSON.h"
+#include "wifi_service_port.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -102,6 +104,18 @@ weather_status_t weather_seniverse_parse(const char *json, size_t length, weathe
         result->data.forecast = value;
     } else goto done;
     status = WEATHER_OK;
+    /* 界面展示的是“本次刷新时间”，用本地 RTC 覆盖 API 的服务器观测时间。 */
+    time_service_datetime_t dt = {0};
+    char stamp[24];
+    if (time_service_get_datetime(&dt) && dt.year >= 1970 &&
+        snprintf(stamp, sizeof(stamp), "%04u-%02u-%02u %02u:%02u:%02u",
+                 (unsigned)dt.year, (unsigned)dt.month, (unsigned)dt.day,
+                 (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second) > 0) {
+        if (result->endpoint == WEATHER_CURRENT)
+            strcpy(result->data.current.updated, stamp);
+        else if (result->endpoint == WEATHER_FORECAST)
+            strcpy(result->data.forecast.updated, stamp);
+    }
 done:
     cJSON_Delete(root); return status;
 }

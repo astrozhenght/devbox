@@ -657,7 +657,9 @@ static void ui_file_manager_create_internal(lv_obj_t *parent, const char *start_
     lv_obj_set_style_text_color(head, lv_color_hex(FILE_MANAGER_COLOR_MUTED), 0);
     lv_obj_set_grid_dsc_array(head, file_columns, file_row);
     make_cell(head, 0, "名称");
-    make_cell(head, 1, "创建时间");
+    /* 表头“创建时间”向右收进，与下方时间文本左边缘对齐。 */
+    lv_obj_t *date_header = make_cell(head, 1, "创建时间");
+    lv_obj_set_style_pad_left(date_header, 18, 0);
     make_cell(head, 2, "数量 / 大小");
 
     lv_obj_t *body = make_panel(browser);

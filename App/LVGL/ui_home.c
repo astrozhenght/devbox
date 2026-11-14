@@ -141,7 +141,7 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     lv_obj_set_style_radius(home_context.system_status_bar, 0, 0);
     /* 左侧与各App标题统一从屏幕18px处起始，右侧间距保持不变。 */
     lv_obj_set_style_pad_left(home_context.system_status_bar, 10, 0);
-    lv_obj_set_style_pad_right(home_context.system_status_bar, 12, 0);
+    lv_obj_set_style_pad_right(home_context.system_status_bar, 0, 0);
     lv_obj_set_style_pad_ver(home_context.system_status_bar, 0, 0);
     lv_obj_set_style_pad_column(home_context.system_status_bar, 6, 0);
 
@@ -192,7 +192,7 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     /* 三个指标占用相同宽度，使两条分隔线左右间距完全一致。 */
     static const lv_coord_t status_grid_cols[] = {
         96, 2, 96, 2, 96, LV_GRID_FR(1),
-        LV_GRID_CONTENT, LV_GRID_CONTENT,
+        LV_GRID_CONTENT, 64,
         LV_GRID_TEMPLATE_LAST
     };
     static const lv_coord_t status_grid_rows[] = { LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
@@ -209,8 +209,16 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
                          LV_GRID_ALIGN_CENTER, 4, 1, LV_GRID_ALIGN_CENTER, 0, 1);
     lv_obj_set_grid_cell(home_context.status_bar_wifi_icon,
                          LV_GRID_ALIGN_END, 6, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    /* WiFi 图标向左移动，和右侧时间拉开距离，避免拥挤。 */
+    lv_obj_set_style_translate_x(home_context.status_bar_wifi_icon, -6, 0);
     lv_obj_set_grid_cell(home_context.status_bar_time_label,
-                         LV_GRID_ALIGN_END, 7, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+                         LV_GRID_ALIGN_STRETCH, 7, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+    /* 时间列固定宽度并左对齐，数字宽度变化时左边缘不再跳动。 */
+    lv_obj_set_width(home_context.status_bar_time_label, 64);
+    lv_obj_set_style_text_align(home_context.status_bar_time_label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(home_context.status_bar_time_label, LV_LABEL_LONG_CLIP);
+    /* 固定列内右侧留白较多，整体右移使时间右缘贴近“返回主页”按钮。 */
+    lv_obj_set_style_translate_x(home_context.status_bar_time_label, 6, 0);
 }
 
 // 为主页信息区域提供统一的白色圆角卡片样式

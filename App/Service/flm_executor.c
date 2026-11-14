@@ -19,11 +19,6 @@ static uint8_t verify_buffer[FLM_VERIFY_CHUNK]
     __attribute__((section(".axisram"), aligned(32)));
 static const uint8_t zero_buffer[FLM_VERIFY_CHUNK] = {0};
 
-static uint32_t align_up(uint32_t value, uint32_t alignment)
-{
-    return (value + alignment - 1U) & ~(alignment - 1U);
-}
-
 static swd_target_status_t write_and_verify(uint32_t address, const uint8_t *data,
                                             uint32_t size)
 {
@@ -49,26 +44,51 @@ swd_target_status_t flm_executor_load(flm_executor_t *executor,
                                       const flm_algorithm_t *algorithm,
                                       const target_profile_t *profile)
 {
-    uint32_t code_end;
-    uint32_t stack_base;
+    if (profile == NULL) return SWD_TARGET_ARGUMENT;
+    return flm_executor_load_at(executor, algorithm, profile->ram_start, profile->ram_size);
+}
+
+swd_target_status_t flm_executor_load_at(flm_executor_t *executor,
+                                         const flm_algorithm_t *algorithm,
+                                         uint32_t ram_start, uint32_t ram_size)
+{
+    uint64_t code_end;
+    uint64_t page_buffer;
+    uint64_t stack_pointer;
+    uint64_t stack_base;
     uint32_t index;
     swd_target_status_t status;
     const uint32_t return_stub = 0xE7FEBE00U; /* BKPT 0; B . */
 
-    if ((executor == NULL) || (algorithm == NULL) || (profile == NULL) ||
-        (algorithm->page_size == 0U)) return SWD_TARGET_ARGUMENT;
+    if ((executor == NULL) || (algorithm == NULL) || (algorithm->page_size == 0U) ||
+        (algorithm->image_size == 0U) || (ram_size <= FLM_STACK_SIZE) ||
+        ((ram_start & 7U) != 0U) || (ram_start > UINT32_MAX - ram_size) ||
+        (algorithm->static_base_offset >= algorithm->image_size) ||
+        (algorithm->section_count > FLM_MAX_LOAD_SECTIONS))
+        return SWD_TARGET_ARGUMENT;
+
+    /* 先用64位计算完整布局，验证后再转成目标地址，防止回绕绕过容量检查。 */
+    code_end = ((uint64_t)ram_start + algorithm->image_size + 3U) & ~UINT64_C(3);
+    page_buffer = (code_end + sizeof(return_stub) + 7U) & ~UINT64_C(7);
+    stack_pointer = ((uint64_t)ram_start + ram_size) & ~UINT64_C(7);
+    stack_base = stack_pointer - FLM_STACK_SIZE;
+    if ((stack_base < ram_start) ||
+        ((page_buffer + algorithm->page_size) > stack_base))
+        return SWD_TARGET_ARGUMENT;
+    for (index = 0U; index < algorithm->section_count; index++)
+    {
+        const flm_load_section_t *section = &algorithm->sections[index];
+        if ((section->address > algorithm->image_size) ||
+            (section->size > algorithm->image_size - section->address))
+            return SWD_TARGET_ARGUMENT;
+    }
     memset(executor, 0, sizeof(*executor));
     executor->algorithm = algorithm;
-    executor->load_address = profile->ram_start;
+    executor->load_address = ram_start;
     executor->static_base = executor->load_address + algorithm->static_base_offset;
-    code_end = align_up(executor->load_address + algorithm->image_size, 4U);
-    executor->return_address = code_end;
-    executor->page_buffer = align_up(code_end + sizeof(return_stub), 8U);
-    executor->stack_pointer = (profile->ram_start + profile->ram_size) & ~7U;
-    stack_base = executor->stack_pointer - FLM_STACK_SIZE;
-    if ((executor->page_buffer > UINT32_MAX - algorithm->page_size) ||
-        ((executor->page_buffer + algorithm->page_size) > stack_base))
-        return SWD_TARGET_ARGUMENT;
+    executor->return_address = (uint32_t)code_end;
+    executor->page_buffer = (uint32_t)page_buffer;
+    executor->stack_pointer = (uint32_t)stack_pointer;
 
     status = swd_target_halt(1000U);
     if (status != SWD_TARGET_OK) return status;

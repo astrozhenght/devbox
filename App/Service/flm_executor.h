@@ -20,6 +20,9 @@ typedef struct
 swd_target_status_t flm_executor_load(flm_executor_t *executor,
                                       const flm_algorithm_t *algorithm,
                                       const target_profile_t *profile);
+swd_target_status_t flm_executor_load_at(flm_executor_t *executor,
+                                         const flm_algorithm_t *algorithm,
+                                         uint32_t ram_start, uint32_t ram_size);
 swd_target_status_t flm_executor_call(const flm_executor_t *executor,
                                       uint32_t function_offset,
                                       uint32_t argument0,
