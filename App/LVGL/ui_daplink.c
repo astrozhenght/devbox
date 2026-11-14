@@ -441,10 +441,18 @@ static void ui_daplink_update_local(const dap_programmer_status_t *programmer)
         programmer->dpidr != 0U ? (busy ? "目标已识别" : "上次识别") :
         (busy ? "正在连接目标" : "目标未连接"));
     if (programmer->dpidr != 0U)
-        lv_label_set_text_fmt(daplink_context.local_id_label, "#000000 IDCODE 0x%08lX#",
+    {
+        lv_label_set_text_fmt(daplink_context.local_id_label, "0x%08lX",
                               (unsigned long)programmer->dpidr);
+        lv_obj_set_style_text_color(daplink_context.local_id_label,
+                                    lv_color_hex(DAP_UI_TEXT_COLOR), 0);
+    }
     else
-        lv_label_set_text(daplink_context.local_id_label, "#000000 IDCODE# #69788B --#");
+    {
+        lv_label_set_text(daplink_context.local_id_label, "--");
+        lv_obj_set_style_text_color(daplink_context.local_id_label,
+                                    lv_color_hex(DAP_UI_MUTED_COLOR), 0);
+    }
 }
 
 static void ui_daplink_set_clock(lv_obj_t *label, uint32_t hz)
@@ -623,6 +631,8 @@ void ui_daplink_create(lv_obj_t *parent)
     static const lv_coord_t action_rows[] = {42, LV_GRID_TEMPLATE_LAST};
     static const lv_coord_t stage_cols[] = {200, LV_GRID_FR(1), 156, LV_GRID_TEMPLATE_LAST};
     static const lv_coord_t stage_rows[] = {29, LV_GRID_TEMPLATE_LAST};
+    static const lv_coord_t field_cols[] = {70, LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
+    static const lv_coord_t field_rows[] = {34, LV_GRID_TEMPLATE_LAST};
     lv_obj_t *header, *spacer, *home, *tabs, *overview, *card, *row;
     dap_programmer_status_t programmer;
     bool restore;
@@ -723,18 +733,27 @@ void ui_daplink_create(lv_obj_t *parent)
     ui_daplink_grid_cell(card, 1, 0, 1);
     row = ui_daplink_card_body(card, "目标信息");
     daplink_context.local_target_label = ui_daplink_create_label(row, "目标未连接", DAP_UI_MUTED_COLOR);
-    daplink_context.local_id_label = ui_daplink_create_label(row, "IDCODE --", DAP_UI_TEXT_COLOR);
-    lv_label_set_recolor(daplink_context.local_id_label, true);
+    {
+        lv_obj_t *id_row = ui_daplink_create_panel(row, false);
+        lv_obj_set_size(id_row, lv_pct(100), 34);
+        lv_obj_set_grid_dsc_array(id_row, field_cols, field_rows);
+        lv_obj_t *caption = ui_daplink_create_label(id_row, "IDCODE", DAP_UI_MUTED_COLOR);
+        lv_obj_set_grid_cell(caption, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+        daplink_context.local_id_label = ui_daplink_create_label(id_row, "--", DAP_UI_TEXT_COLOR);
+        lv_obj_set_grid_cell(daplink_context.local_id_label, LV_GRID_ALIGN_STRETCH,
+                             1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
+        lv_obj_set_style_pad_left(daplink_context.local_id_label, 8, 0);
+        lv_label_set_long_mode(daplink_context.local_id_label, LV_LABEL_LONG_DOT);
+    }
     {
         lv_obj_t *clock_row = ui_daplink_create_panel(row, false);
         lv_obj_set_size(clock_row, lv_pct(100), 34);
-        lv_obj_set_flex_flow(clock_row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(clock_row, LV_FLEX_ALIGN_START,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        (void)ui_daplink_create_label(clock_row, "SWD", DAP_UI_TEXT_COLOR);
+        lv_obj_set_grid_dsc_array(clock_row, field_cols, field_rows);
+        lv_obj_t *caption = ui_daplink_create_label(clock_row, "SWD", DAP_UI_MUTED_COLOR);
+        lv_obj_set_grid_cell(caption, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 0, 1);
         daplink_context.clock_dropdown = lv_dropdown_create(clock_row);
-        lv_obj_set_size(daplink_context.clock_dropdown, 0, 34);
-        lv_obj_set_flex_grow(daplink_context.clock_dropdown, 1);
+        lv_obj_set_grid_cell(daplink_context.clock_dropdown, LV_GRID_ALIGN_STRETCH,
+                             1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
         lv_obj_set_style_pad_ver(daplink_context.clock_dropdown, 1, 0);
         lv_obj_set_style_pad_hor(daplink_context.clock_dropdown, 8, 0);
         lv_dropdown_set_options(daplink_context.clock_dropdown,
