@@ -185,7 +185,14 @@ USBD_StatusTypeDef USBD_StdItfReq(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef
         case USBD_STATE_ADDRESSED:
         case USBD_STATE_CONFIGURED:
 
-          if (LOBYTE(req->wIndex) <= USBD_MAX_NUM_INTERFACES)
+          /* WinUSB vendor requests are separate from CDC class requests. */
+          if (req->bmRequest == 0xC1U)
+          {
+            USBD_WinUSBGetDescriptor(pdev, req);
+            break;
+          }
+
+          if (LOBYTE(req->wIndex) < USBD_MAX_NUM_INTERFACES)
           {
             /* Get the class index relative to this interface */
             idx = USBD_CoreFindIF(pdev, LOBYTE(req->wIndex));
@@ -215,14 +222,13 @@ USBD_StatusTypeDef USBD_StdItfReq(USBD_HandleTypeDef *pdev, USBD_SetupReqTypedef
             }
           }
 
-          //-----------------ADD GUOXUAN-------------
-          if ( req->bmRequest == 0xC1 )
-          {
-              USBD_WinUSBGetDescriptor( pdev, req );
-              break;
-          }
-          //----------------------------------------
           else
+          {
+            ret = USBD_FAIL;
+          }
+
+          /* 已成功处理的 CDC 请求不能再 STALL，否则 Windows 无法打开串口。 */
+          if (ret != USBD_OK)
           {
             USBD_CtlError(pdev, req);
           }

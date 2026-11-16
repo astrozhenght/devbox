@@ -6,12 +6,20 @@
 #include "usbd_ctlreq.h"
 #include "usbd_ioreq.h"
 
-#define USBD_DAP_CONFIG_DESC_SIZE 32U
+#define USBD_DAP_CONFIG_DESC_SIZE 98U
 #define USBD_DAP_OS_STRING_SIZE   18U
+#define USBD_CDC_COMM_INTERFACE   1U
+#define USBD_CDC_DATA_INTERFACE   2U
+#define USBD_CDC_SET_LINE_CODING  0x20U
+#define USBD_CDC_GET_LINE_CODING  0x21U
+#define USBD_CDC_SET_CONTROL_LINE 0x22U
+#define USBD_PC_MONITOR_RX_COUNT  8U
 
 typedef struct
 {
-    uint8_t alternate_setting;
+    uint8_t alternate_setting[3];
+    uint8_t line_coding[7];
+    uint16_t control_line_state;
 } usbd_dap_handle_t;
 
 typedef struct
@@ -32,9 +40,11 @@ static uint8_t *usbd_dap_get_qualifier_descriptor(uint16_t *length);
 static uint8_t *usbd_dap_get_os_string_descriptor(uint16_t *length);
 static void usbd_dap_arm_receive(void);
 static void usbd_dap_start_transmit(void);
+static void usbd_pc_monitor_arm_receive(void);
 
 static USBD_HandleTypeDef *dap_device;
 static TaskHandle_t dap_consumer_task;
+static TaskHandle_t pc_monitor_consumer_task;
 /* USB 缓冲固定放在 MPU 已配置为 non-cacheable 的 AXI SRAM。 */
 static USBD_DAP_RAM usbd_dap_packet_t rx_queue[USBD_DAP_PACKET_COUNT];
 static USBD_DAP_RAM usbd_dap_packet_t tx_queue[USBD_DAP_PACKET_COUNT];
@@ -46,13 +56,21 @@ static volatile uint8_t tx_head;
 static volatile uint8_t tx_tail;
 static volatile uint8_t tx_count;
 static volatile uint8_t tx_active;
+static USBD_DAP_RAM usbd_dap_packet_t pc_monitor_rx_queue[USBD_PC_MONITOR_RX_COUNT];
+static USBD_DAP_RAM uint8_t pc_monitor_usb_rx[USBD_PC_MONITOR_PACKET_SIZE];
+static USBD_DAP_RAM uint8_t pc_monitor_usb_tx[USBD_PC_MONITOR_PACKET_SIZE];
+static volatile uint8_t pc_monitor_rx_head;
+static volatile uint8_t pc_monitor_rx_tail;
+static volatile uint8_t pc_monitor_rx_count;
+static volatile uint8_t pc_monitor_rx_armed;
+static volatile uint8_t pc_monitor_tx_active;
 static volatile uint8_t tx_zlp_pending; /* 零长度结束包（ZLP）待发送或正在发送。 */
 
 __ALIGN_BEGIN static uint8_t dap_config_descriptor[USBD_DAP_CONFIG_DESC_SIZE] __ALIGN_END =
 {
     0x09U, USB_DESC_TYPE_CONFIGURATION,
     LOBYTE(USBD_DAP_CONFIG_DESC_SIZE), HIBYTE(USBD_DAP_CONFIG_DESC_SIZE),
-    0x01U, 0x01U, USBD_IDX_CONFIG_STR, 0x80U, 0xFAU,
+    0x03U, 0x01U, USBD_IDX_CONFIG_STR, 0x80U, 0xFAU,
 
     0x09U, USB_DESC_TYPE_INTERFACE,
     0x00U, 0x00U, 0x02U,
@@ -62,13 +80,29 @@ __ALIGN_BEGIN static uint8_t dap_config_descriptor[USBD_DAP_CONFIG_DESC_SIZE] __
     LOBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), HIBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), 0x00U,
 
     0x07U, USB_DESC_TYPE_ENDPOINT, USBD_DAP_IN_EP, 0x02U,
-    LOBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), HIBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), 0x00U
+    LOBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), HIBYTE(USBD_DAP_FS_MAX_PACKET_SIZE), 0x00U,
+
+    0x08U, 0x0BU, USBD_CDC_COMM_INTERFACE, 0x02U, 0x02U, 0x02U, 0x01U, 0x00U,
+    0x09U, USB_DESC_TYPE_INTERFACE,
+    USBD_CDC_COMM_INTERFACE, 0x00U, 0x01U, 0x02U, 0x02U, 0x01U, 0x00U,
+    0x05U, 0x24U, 0x00U, 0x10U, 0x01U,
+    0x05U, 0x24U, 0x01U, 0x00U, USBD_CDC_DATA_INTERFACE,
+    0x04U, 0x24U, 0x02U, 0x02U,
+    0x05U, 0x24U, 0x06U, USBD_CDC_COMM_INTERFACE, USBD_CDC_DATA_INTERFACE,
+    0x07U, USB_DESC_TYPE_ENDPOINT, USBD_PC_MONITOR_CMD_EP, 0x03U,
+    0x08U, 0x00U, 0x10U,
+    0x09U, USB_DESC_TYPE_INTERFACE,
+    USBD_CDC_DATA_INTERFACE, 0x00U, 0x02U, 0x0AU, 0x00U, 0x00U, 0x00U,
+    0x07U, USB_DESC_TYPE_ENDPOINT, USBD_PC_MONITOR_OUT_EP, 0x02U,
+    LOBYTE(USBD_PC_MONITOR_PACKET_SIZE), HIBYTE(USBD_PC_MONITOR_PACKET_SIZE), 0x00U,
+    0x07U, USB_DESC_TYPE_ENDPOINT, USBD_PC_MONITOR_IN_EP, 0x02U,
+    LOBYTE(USBD_PC_MONITOR_PACKET_SIZE), HIBYTE(USBD_PC_MONITOR_PACKET_SIZE), 0x00U
 };
 
 __ALIGN_BEGIN static uint8_t dap_qualifier_descriptor[USB_LEN_DEV_QUALIFIER_DESC] __ALIGN_END =
 {
     USB_LEN_DEV_QUALIFIER_DESC, USB_DESC_TYPE_DEVICE_QUALIFIER,
-    0x00U, 0x02U, 0x00U, 0x00U, 0x00U, USB_MAX_EP0_SIZE, 0x01U, 0x00U
+    0x00U, 0x02U, 0xEFU, 0x02U, 0x01U, USB_MAX_EP0_SIZE, 0x01U, 0x00U
 };
 
 /* Microsoft OS 1.0 string descriptor. Vendor code 0xA0 requests WinUSB data. */
@@ -102,6 +136,28 @@ static uint8_t usbd_dap_next(uint8_t index)
 {
     index++;
     return (index == USBD_DAP_PACKET_COUNT) ? 0U : index;
+}
+
+static uint8_t usbd_pc_monitor_next(uint8_t index)
+{
+    index++;
+    return (index == USBD_PC_MONITOR_RX_COUNT) ? 0U : index;
+}
+
+static void usbd_pc_monitor_arm_receive(void)
+{
+    if ((dap_device == NULL) || (pc_monitor_rx_armed != 0U) ||
+        (pc_monitor_rx_count >= USBD_PC_MONITOR_RX_COUNT))
+    {
+        return;
+    }
+    pc_monitor_rx_armed = 1U;
+    if (USBD_LL_PrepareReceive(dap_device, USBD_PC_MONITOR_OUT_EP,
+                               pc_monitor_usb_rx,
+                               sizeof(pc_monitor_usb_rx)) != USBD_OK)
+    {
+        pc_monitor_rx_armed = 0U;
+    }
 }
 
 static void usbd_dap_arm_receive(void)
@@ -166,6 +222,18 @@ static uint8_t usbd_dap_init(USBD_HandleTypeDef *device, uint8_t config_index)
     tx_tail = 0U;
     tx_count = 0U;
     tx_active = 0U;
+    pc_monitor_rx_head = 0U;
+    pc_monitor_rx_tail = 0U;
+    pc_monitor_rx_count = 0U;
+    pc_monitor_rx_armed = 0U;
+    pc_monitor_tx_active = 0U;
+    handle->line_coding[0] = 0x00U;
+    handle->line_coding[1] = 0xC2U;
+    handle->line_coding[2] = 0x01U;
+    handle->line_coding[3] = 0x00U;
+    handle->line_coding[4] = 0x00U;
+    handle->line_coding[5] = 0x00U;
+    handle->line_coding[6] = 0x08U;
     tx_zlp_pending = 0U; /* USB 重新初始化时清除未完成的 ZLP 状态。 */
 
     if ((USBD_LL_OpenEP(device,
@@ -175,7 +243,15 @@ static uint8_t usbd_dap_init(USBD_HandleTypeDef *device, uint8_t config_index)
         (USBD_LL_OpenEP(device,
                         USBD_DAP_IN_EP,
                         USBD_EP_TYPE_BULK,
-                        USBD_DAP_FS_MAX_PACKET_SIZE) != USBD_OK))
+                        USBD_DAP_FS_MAX_PACKET_SIZE) != USBD_OK) ||
+        (USBD_LL_OpenEP(device, USBD_PC_MONITOR_CMD_EP,
+                        USBD_EP_TYPE_INTR, 8U) != USBD_OK) ||
+        (USBD_LL_OpenEP(device, USBD_PC_MONITOR_OUT_EP,
+                        USBD_EP_TYPE_BULK,
+                        USBD_PC_MONITOR_PACKET_SIZE) != USBD_OK) ||
+        (USBD_LL_OpenEP(device, USBD_PC_MONITOR_IN_EP,
+                        USBD_EP_TYPE_BULK,
+                        USBD_PC_MONITOR_PACKET_SIZE) != USBD_OK))
     {
         USBD_free(handle);
         device->pClassData = NULL;
@@ -185,7 +261,11 @@ static uint8_t usbd_dap_init(USBD_HandleTypeDef *device, uint8_t config_index)
 
     device->ep_out[USBD_DAP_OUT_EP & 0x0FU].is_used = 1U;
     device->ep_in[USBD_DAP_IN_EP & 0x0FU].is_used = 1U;
+    device->ep_in[USBD_PC_MONITOR_CMD_EP & 0x0FU].is_used = 1U;
+    device->ep_out[USBD_PC_MONITOR_OUT_EP & 0x0FU].is_used = 1U;
+    device->ep_in[USBD_PC_MONITOR_IN_EP & 0x0FU].is_used = 1U;
     usbd_dap_arm_receive();
+    usbd_pc_monitor_arm_receive();
     return USBD_OK;
 }
 
@@ -194,8 +274,14 @@ static uint8_t usbd_dap_deinit(USBD_HandleTypeDef *device, uint8_t config_index)
     (void)config_index;
     (void)USBD_LL_CloseEP(device, USBD_DAP_OUT_EP);
     (void)USBD_LL_CloseEP(device, USBD_DAP_IN_EP);
+    (void)USBD_LL_CloseEP(device, USBD_PC_MONITOR_CMD_EP);
+    (void)USBD_LL_CloseEP(device, USBD_PC_MONITOR_OUT_EP);
+    (void)USBD_LL_CloseEP(device, USBD_PC_MONITOR_IN_EP);
     device->ep_out[USBD_DAP_OUT_EP & 0x0FU].is_used = 0U;
     device->ep_in[USBD_DAP_IN_EP & 0x0FU].is_used = 0U;
+    device->ep_in[USBD_PC_MONITOR_CMD_EP & 0x0FU].is_used = 0U;
+    device->ep_out[USBD_PC_MONITOR_OUT_EP & 0x0FU].is_used = 0U;
+    device->ep_in[USBD_PC_MONITOR_IN_EP & 0x0FU].is_used = 0U;
 
     if (device->pClassData != NULL)
     {
@@ -209,23 +295,51 @@ static uint8_t usbd_dap_deinit(USBD_HandleTypeDef *device, uint8_t config_index)
 static uint8_t usbd_dap_setup(USBD_HandleTypeDef *device, USBD_SetupReqTypedef *request)
 {
     usbd_dap_handle_t *handle = (usbd_dap_handle_t *)device->pClassData;
+    uint8_t interface = (uint8_t)request->wIndex;
 
     if (handle == NULL)
     {
         return USBD_FAIL;
     }
 
-    if ((request->bmRequest & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_STANDARD)
+    if (((request->bmRequest & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_CLASS) &&
+        (interface == USBD_CDC_COMM_INTERFACE))
+    {
+        switch (request->bRequest)
+        {
+            case USBD_CDC_SET_LINE_CODING:
+                return (uint8_t)USBD_CtlPrepareRx(device,
+                                                  handle->line_coding, 7U);
+            case USBD_CDC_GET_LINE_CODING:
+                return (uint8_t)USBD_CtlSendData(device,
+                                                 handle->line_coding, 7U);
+            case USBD_CDC_SET_CONTROL_LINE:
+                handle->control_line_state = request->wValue;
+                return USBD_OK;
+            default:
+                break;
+        }
+    }
+    else if ((request->bmRequest & USB_REQ_TYPE_MASK) == USB_REQ_TYPE_STANDARD)
     {
         switch (request->bRequest)
         {
             case USB_REQ_GET_INTERFACE:
-                (void)USBD_CtlSendData(device, &handle->alternate_setting, 1U);
-                return USBD_OK;
+                if (interface < 3U)
+                {
+                    (void)USBD_CtlSendData(device,
+                                           &handle->alternate_setting[interface], 1U);
+                    return USBD_OK;
+                }
+                break;
 
             case USB_REQ_SET_INTERFACE:
-                handle->alternate_setting = (uint8_t)request->wValue;
-                return USBD_OK;
+                if (interface < 3U)
+                {
+                    handle->alternate_setting[interface] = (uint8_t)request->wValue;
+                    return USBD_OK;
+                }
+                break;
 
             default:
                 break;
@@ -241,6 +355,15 @@ static uint8_t usbd_dap_setup(USBD_HandleTypeDef *device, USBD_SetupReqTypedef *
 static uint8_t usbd_dap_data_in(USBD_HandleTypeDef *device, uint8_t endpoint)
 {
     (void)device;
+    if (((endpoint & 0x0FU) == (USBD_PC_MONITOR_IN_EP & 0x0FU)) ||
+        ((endpoint & 0x0FU) == (USBD_PC_MONITOR_CMD_EP & 0x0FU)))
+    {
+        if ((endpoint & 0x0FU) == (USBD_PC_MONITOR_IN_EP & 0x0FU))
+        {
+            pc_monitor_tx_active = 0U;
+        }
+        return USBD_OK;
+    }
     if ((endpoint & 0x0FU) != (USBD_DAP_IN_EP & 0x0FU))
     {
         return USBD_FAIL;
@@ -274,6 +397,33 @@ static uint8_t usbd_dap_data_out(USBD_HandleTypeDef *device, uint8_t endpoint)
 {
     BaseType_t higher_priority_task_woken = pdFALSE;
     uint32_t length;
+
+    if ((endpoint & 0x0FU) == (USBD_PC_MONITOR_OUT_EP & 0x0FU))
+    {
+        pc_monitor_rx_armed = 0U;
+        length = USBD_LL_GetRxDataSize(device, USBD_PC_MONITOR_OUT_EP);
+        if ((length != 0U) &&
+            (pc_monitor_rx_count < USBD_PC_MONITOR_RX_COUNT))
+        {
+            if (length > USBD_PC_MONITOR_PACKET_SIZE)
+            {
+                length = USBD_PC_MONITOR_PACKET_SIZE;
+            }
+            memcpy(pc_monitor_rx_queue[pc_monitor_rx_head].data,
+                   pc_monitor_usb_rx, length);
+            pc_monitor_rx_queue[pc_monitor_rx_head].length = length;
+            pc_monitor_rx_head = usbd_pc_monitor_next(pc_monitor_rx_head);
+            pc_monitor_rx_count++;
+            if (pc_monitor_consumer_task != NULL)
+            {
+                vTaskNotifyGiveFromISR(pc_monitor_consumer_task,
+                                       &higher_priority_task_woken);
+            }
+        }
+        usbd_pc_monitor_arm_receive();
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+        return USBD_OK;
+    }
 
     if ((endpoint & 0x0FU) != (USBD_DAP_OUT_EP & 0x0FU))
     {
@@ -392,4 +542,84 @@ bool usbd_dap_transmit(const uint8_t *data, uint32_t length)
     usbd_dap_start_transmit();
     taskEXIT_CRITICAL();
     return true;
+}
+
+void usbd_pc_monitor_bind_consumer_task(TaskHandle_t task)
+{
+    taskENTER_CRITICAL();
+    pc_monitor_consumer_task = task;
+    taskEXIT_CRITICAL();
+
+    if ((task != NULL) && (pc_monitor_rx_count != 0U))
+    {
+        xTaskNotifyGive(task);
+    }
+}
+
+bool usbd_pc_monitor_receive(uint8_t *data,
+                             uint32_t capacity,
+                             uint32_t *length,
+                             TickType_t timeout)
+{
+    uint32_t copy_length;
+
+    if ((data == NULL) || (length == NULL) || (capacity == 0U))
+    {
+        return false;
+    }
+    if ((pc_monitor_rx_count == 0U) &&
+        (ulTaskNotifyTake(pdTRUE, timeout) == 0U))
+    {
+        return false;
+    }
+    if (pc_monitor_rx_count == 0U)
+    {
+        return false;
+    }
+
+    copy_length = pc_monitor_rx_queue[pc_monitor_rx_tail].length;
+    if (copy_length > capacity)
+    {
+        copy_length = capacity;
+    }
+    memcpy(data, pc_monitor_rx_queue[pc_monitor_rx_tail].data, copy_length);
+
+    taskENTER_CRITICAL();
+    pc_monitor_rx_tail = usbd_pc_monitor_next(pc_monitor_rx_tail);
+    pc_monitor_rx_count--;
+    usbd_pc_monitor_arm_receive();
+    taskEXIT_CRITICAL();
+    *length = copy_length;
+    return true;
+}
+
+bool usbd_pc_monitor_transmit(const uint8_t *data, uint32_t length)
+{
+    bool accepted = false;
+
+    if ((data == NULL) || (length == 0U) ||
+        (length > USBD_PC_MONITOR_PACKET_SIZE) || (dap_device == NULL))
+    {
+        return false;
+    }
+
+    taskENTER_CRITICAL();
+    if (pc_monitor_tx_active == 0U)
+    {
+        memcpy(pc_monitor_usb_tx, data, length);
+        pc_monitor_tx_active = 1U;
+        accepted = true;
+    }
+    taskEXIT_CRITICAL();
+
+    if (accepted &&
+        (USBD_LL_Transmit(dap_device, USBD_PC_MONITOR_IN_EP,
+                          pc_monitor_usb_tx, length) != USBD_OK))
+    {
+        taskENTER_CRITICAL();
+        pc_monitor_tx_active = 0U;
+        taskEXIT_CRITICAL();
+        accepted = false;
+    }
+    return accepted;
 }

@@ -42,6 +42,9 @@
 # Local tests
 /Tests/
 
+# Local development tools and host utilities
+/Tools/
+
 # Documentation: keep only explicitly versioned project documents
 /Docs/*
 !/Docs/PROJECT_ARCHITECTURE_V2.1.md
@@ -79,4 +82,5 @@ Desktop.ini
 *.log
 Project/MDK-ARM/JLinkLog.txt
 Project/MDK-ARM/DebugConfig/project_STM32H743XIHx_1.1.0.dbgconf
-Tools/WEATHER_ICONS.md
+.gitignore
+output/imagegen/pc-monitor-gauge.png

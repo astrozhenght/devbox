@@ -4,6 +4,7 @@
 #include "wifi_service_port.h"
 #include "file_task.h"
 #include "dap_task.h"
+#include "pc_monitor_task.h"
 
 bool app_tasks_create(void)
 {
@@ -13,6 +14,11 @@ bool app_tasks_create(void)
     }
 
     if (!dap_task_create())
+    {
+        return false;
+    }
+
+    if (!pc_monitor_task_create())
     {
         return false;
     }

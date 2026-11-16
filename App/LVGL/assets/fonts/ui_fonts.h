@@ -5,8 +5,7 @@
 
 //声明字体
 LV_FONT_DECLARE(ui_font_chinese_12_1);
-LV_FONT_DECLARE(ui_font_chinese_16_1);
-LV_FONT_DECLARE(ui_font_chinese_24_1);
+LV_FONT_DECLARE(ui_font_chinese_20);
 LV_FONT_DECLARE(ui_font_chinese_24_4);
 LV_FONT_DECLARE(ui_font_chinese_32_1);
 LV_FONT_DECLARE(ui_font_chinese_32_2);

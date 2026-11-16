@@ -8,6 +8,7 @@
 #include "ui_file_manager.h"
 #include "ui_calculator.h"
 #include "ui_daplink.h"
+#include "ui_pc_monitor.h"
 #include "system_monitor.h"
 #include "ui_images.h"
 #include "ui_fonts.h"
@@ -31,6 +32,7 @@ typedef enum
     APP_WEATHER,
     APP_CALENDAR,
     APP_CALCULATOR,
+    APP_PC_MONITOR,
     APP_COUNT
 } ui_home_app_id_t;
 
@@ -58,6 +60,7 @@ static const ui_home_app_descriptor_t app_descriptors[APP_COUNT] =
     [APP_WEATHER]       = {"天气",         "WEA",   &ui_img_icon_weather,  true,  2, 0},
     [APP_CALENDAR]      = {"日历",         "CAL",   &ui_img_icon_calendar, true,  3, 0},
     [APP_CALCULATOR]    = {"计算器",       "CALC",  &ui_img_icon_calculator, true, 4, 0},
+    [APP_PC_MONITOR]    = {"电脑监视",     "PC",    NULL,                    true, 2, 1},
 };
 
 typedef struct
@@ -646,6 +649,22 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     lv_obj_set_style_text_font(home_context.app_items[APP_CALCULATOR].button_label,
                                &ui_font_chinese_24_4, 0);
 
+    home_context.app_items[APP_PC_MONITOR].button = lv_btn_create(home_context.app_launcher);
+    lv_obj_add_style(home_context.app_items[APP_PC_MONITOR].button,
+                     &home_context.style_btn_normal, 0);
+    home_context.app_items[APP_PC_MONITOR].button_icon = lv_obj_create(
+        home_context.app_items[APP_PC_MONITOR].button);
+    lv_obj_set_style_pad_all(home_context.app_items[APP_PC_MONITOR].button_icon, 0, 0);
+    home_context.app_items[APP_PC_MONITOR].button_icon_label = lv_label_create(
+        home_context.app_items[APP_PC_MONITOR].button_icon);
+    lv_obj_set_style_text_font(home_context.app_items[APP_PC_MONITOR].button_icon_label,
+                               &ui_font_chinese_24_4, 0);
+    lv_obj_center(home_context.app_items[APP_PC_MONITOR].button_icon_label);
+    home_context.app_items[APP_PC_MONITOR].button_label = lv_label_create(
+        home_context.app_items[APP_PC_MONITOR].button);
+    lv_obj_set_style_text_font(home_context.app_items[APP_PC_MONITOR].button_label,
+                               &ui_font_chinese_24_4, 0);
+
     /*
      * 在所有对象创建完成后统一应用网格位置和状态样式。
      * 这样新增应用时只需补充描述表和对象，不会遗漏文字颜色、按下反馈或禁用状态。
@@ -762,6 +781,10 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     else if (target == home_context.app_items[APP_CALCULATOR].button_icon)
     {
         ui_calculator_create(lv_scr_act());
+    }
+    else if (target == home_context.app_items[APP_PC_MONITOR].button_icon)
+    {
+        ui_pc_monitor_create(lv_scr_act());
     }
 }
 
