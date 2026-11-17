@@ -1,5 +1,6 @@
 #include "pc_monitor_service.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -40,19 +41,19 @@ static void pc_monitor_append_history(const pc_monitor_snapshot_t *snapshot)
     if (monitor_history.count < PC_MONITOR_HISTORY_POINTS) monitor_history.count++;
 }
 
-/* PCMON v3: 仅解析当前 UI 使用的 17 个数据字段。 */
-static bool pc_monitor_parse_metrics_v3(const char *line,
+/* PCMON v4: 四个速率字段直接使用 B/s，避免低速数据量化为零。 */
+static bool pc_monitor_parse_metrics_v4(const char *line,
                                         pc_monitor_snapshot_t *snapshot,
                                         uint32_t now_ms)
 {
     unsigned protocol, sequence, ram_used, ram_total;
-    unsigned net_upload, net_download, cpu_frequency, cpu_base_frequency;
+    unsigned cpu_frequency, cpu_base_frequency;
     unsigned vram_used, vram_total, gpu_frequency, gpu_max_frequency;
-    unsigned disk_read, disk_write;
+    unsigned long long net_upload, net_download, disk_read, disk_write;
     int cpu, ram, disk_usage;
 
     if (sscanf(line,
-               "PCMON,%u,%u,%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u",
+               "PCMON,%u,%u,%d,%d,%u,%u,%llu,%llu,%u,%u,%u,%u,%u,%u,%d,%llu,%llu",
                &protocol, &sequence, &cpu, &ram, &ram_used, &ram_total,
                &net_upload, &net_download, &cpu_frequency,
                &cpu_base_frequency, &vram_used, &vram_total, &gpu_frequency,
@@ -60,9 +61,13 @@ static bool pc_monitor_parse_metrics_v3(const char *line,
     {
         return false;
     }
-    if ((protocol != 3U) || (cpu < -1) || (cpu > 100) ||
+    if ((protocol != 4U) || (cpu < -1) || (cpu > 100) ||
         (ram < 0) || (ram > 100) || (ram_used > ram_total) ||
-        (disk_usage < -1) || (disk_usage > 100))
+        (disk_usage < -1) || (disk_usage > 100) ||
+        (cpu_frequency > UINT16_MAX) ||
+        (cpu_base_frequency > UINT16_MAX) ||
+        (gpu_frequency > UINT16_MAX) ||
+        (gpu_max_frequency > UINT16_MAX))
     {
         return false;
     }
@@ -72,8 +77,8 @@ static bool pc_monitor_parse_metrics_v3(const char *line,
     snapshot->ram_usage = (int8_t)ram;
     snapshot->ram_used_mib = ram_used;
     snapshot->ram_total_mib = ram_total;
-    snapshot->net_upload_kib_s = net_upload;
-    snapshot->net_download_kib_s = net_download;
+    snapshot->net_upload_bytes_s = (uint64_t)net_upload;
+    snapshot->net_download_bytes_s = (uint64_t)net_download;
     snapshot->cpu_frequency_mhz = (uint16_t)cpu_frequency;
     snapshot->cpu_base_frequency_mhz = (uint16_t)cpu_base_frequency;
     snapshot->vram_used_mib = vram_used;
@@ -81,8 +86,8 @@ static bool pc_monitor_parse_metrics_v3(const char *line,
     snapshot->gpu_frequency_mhz = (uint16_t)gpu_frequency;
     snapshot->gpu_max_frequency_mhz = (uint16_t)gpu_max_frequency;
     snapshot->disk_usage = (int8_t)disk_usage;
-    snapshot->disk_read_kib_s = disk_read;
-    snapshot->disk_write_kib_s = disk_write;
+    snapshot->disk_read_bytes_s = (uint64_t)disk_read;
+    snapshot->disk_write_bytes_s = (uint64_t)disk_write;
     snapshot->received_ms = now_ms;
     snapshot->valid = true;
     snapshot->connected = true;
@@ -94,7 +99,7 @@ static bool pc_monitor_parse_metrics(const char *line,
                                      pc_monitor_snapshot_t *snapshot,
                                      uint32_t now_ms)
 {
-    return pc_monitor_parse_metrics_v3(line, snapshot, now_ms);
+    return pc_monitor_parse_metrics_v4(line, snapshot, now_ms);
 }
 
 static bool pc_monitor_parse_info(const char *line,
@@ -113,7 +118,8 @@ static bool pc_monitor_parse_info(const char *line,
                     "PCINFO,%u,%47[^,],%47[^,],%47[^,],%23[^,],%23[^,],%u",
                     &protocol, cpu, gpu, ram, ram_type,
                     ram_configuration, &ram_data_rate);
-    if ((fields != 7) || (protocol != 3U)) return false;
+    if ((fields != 7) || (protocol != 4U) ||
+        (ram_data_rate > UINT16_MAX)) return false;
 
     pc_monitor_copy_text(snapshot->cpu_model, sizeof(snapshot->cpu_model), cpu);
     pc_monitor_copy_text(snapshot->gpu_model, sizeof(snapshot->gpu_model), gpu);

@@ -13,8 +13,8 @@
 /**
  * struct pc_monitor_snapshot_t - Windows 性能数据的最新一致性快照
  *
- * PCMON/PCINFO v3 只保留 STM32 界面实际显示的数据，并补充硬件型号与
- * 内存规格。速率字段沿用协议中的 KiB/s，显示时再换算为十进制单位。
+ * PCMON/PCINFO v4 只保留 STM32 界面实际显示的数据，并补充硬件型号与
+ * 内存规格。速率字段统一使用 B/s，保留低速传输的显示精度。
  */
 typedef struct
 {
@@ -25,10 +25,10 @@ typedef struct
     uint32_t ram_total_mib;
     uint32_t vram_used_mib;
     uint32_t vram_total_mib;
-    uint32_t net_upload_kib_s;
-    uint32_t net_download_kib_s;
-    uint32_t disk_read_kib_s;
-    uint32_t disk_write_kib_s;
+    uint64_t net_upload_bytes_s;
+    uint64_t net_download_bytes_s;
+    uint64_t disk_read_bytes_s;
+    uint64_t disk_write_bytes_s;
     uint16_t cpu_frequency_mhz;
     uint16_t cpu_base_frequency_mhz;
     uint16_t gpu_frequency_mhz;

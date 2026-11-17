@@ -218,28 +218,28 @@ static void pc_ui_format_clock(char *buffer, size_t capacity, uint16_t mhz)
         (void)snprintf(buffer, capacity, "%u MHz", mhz);
 }
 
-static void pc_ui_format_rate(char *buffer, size_t capacity, uint32_t kib_s)
+static void pc_ui_format_rate(char *buffer, size_t capacity, uint64_t bytes)
 {
-    uint64_t bytes = (uint64_t)kib_s * 1024ULL;
     uint64_t hundredths;
 
     if (bytes < 1000ULL)
     {
-        (void)snprintf(buffer, capacity, "%lu B/s", (unsigned long)bytes);
+        (void)snprintf(buffer, capacity, "%llu B/s",
+                       (unsigned long long)bytes);
     }
     else if (bytes < 1000000ULL)
     {
         hundredths = (bytes * 100ULL) / 1000ULL;
-        (void)snprintf(buffer, capacity, "%lu.%02lu KB/s",
-                       (unsigned long)(hundredths / 100ULL),
-                       (unsigned long)(hundredths % 100ULL));
+        (void)snprintf(buffer, capacity, "%llu.%02llu KB/s",
+                       (unsigned long long)(hundredths / 100ULL),
+                       (unsigned long long)(hundredths % 100ULL));
     }
     else
     {
         hundredths = (bytes * 100ULL) / 1000000ULL;
-        (void)snprintf(buffer, capacity, "%lu.%02lu MB/s",
-                       (unsigned long)(hundredths / 100ULL),
-                       (unsigned long)(hundredths % 100ULL));
+        (void)snprintf(buffer, capacity, "%llu.%02llu MB/s",
+                       (unsigned long long)(hundredths / 100ULL),
+                       (unsigned long long)(hundredths % 100ULL));
     }
 }
 
@@ -339,8 +339,8 @@ static void pc_ui_update_values(const pc_monitor_snapshot_t *snapshot)
     char second[40];
     char third[40];
     uint8_t vram_percent = pc_ui_vram_percent(snapshot);
-    uint32_t total_network = snapshot->net_upload_kib_s +
-                             snapshot->net_download_kib_s;
+    uint64_t total_network = snapshot->net_upload_bytes_s +
+                             snapshot->net_download_bytes_s;
 
     pc_ui_update_metric(&monitor_ui.cpu, snapshot->cpu_usage);
     pc_ui_update_metric(&monitor_ui.ram, snapshot->ram_usage);
@@ -370,14 +370,14 @@ static void pc_ui_update_values(const pc_monitor_snapshot_t *snapshot)
                           "Used / Total\n%s\n%s\n%s", first, second, third);
 
     pc_ui_format_rate(first, sizeof(first), total_network);
-    pc_ui_format_rate(second, sizeof(second), snapshot->net_upload_kib_s);
-    pc_ui_format_rate(third, sizeof(third), snapshot->net_download_kib_s);
+    pc_ui_format_rate(second, sizeof(second), snapshot->net_upload_bytes_s);
+    pc_ui_format_rate(third, sizeof(third), snapshot->net_download_bytes_s);
     lv_label_set_text_fmt(monitor_ui.network_value_label,
                           "%s\n%s\n%s",
                           first, second, third);
 
-    pc_ui_format_rate(first, sizeof(first), snapshot->disk_read_kib_s);
-    pc_ui_format_rate(second, sizeof(second), snapshot->disk_write_kib_s);
+    pc_ui_format_rate(first, sizeof(first), snapshot->disk_read_bytes_s);
+    pc_ui_format_rate(second, sizeof(second), snapshot->disk_write_bytes_s);
     if (snapshot->disk_usage >= 0)
         lv_label_set_text_fmt(monitor_ui.disk_value_label,
                               "%d%%\n%s\n%s",
