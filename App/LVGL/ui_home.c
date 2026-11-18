@@ -53,14 +53,14 @@ typedef struct
 static const ui_home_app_descriptor_t app_descriptors[APP_COUNT] =
 {
     [APP_UART_TERMINAL] = {"串口助手",     "UART",  &ui_img_icon_uart,     true,  0, 0},
-    [APP_FILE_MANAGER]  = {"文件管理",     "FILE",  &ui_img_icon_folder48, true,  1, 0},
+    [APP_FILE_MANAGER]  = {"文件管理",     "FILE",  &ui_img_icon_filemanager, true,  1, 0},
     [APP_SETTINGS]      = {"设置",         "SET",   &ui_img_icon_setting,  false, 5, 0},
     [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    false, 0, 1},
-    [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_debug,    true,  1, 1},
+    [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_daplink,  true,  1, 1},
     [APP_WEATHER]       = {"天气",         "WEA",   &ui_img_icon_weather,  true,  2, 0},
     [APP_CALENDAR]      = {"日历",         "CAL",   &ui_img_icon_calendar, true,  3, 0},
     [APP_CALCULATOR]    = {"计算器",       "CALC",  &ui_img_icon_calculator, true, 4, 0},
-    [APP_PC_MONITOR]    = {"电脑监视",     "PC",    NULL,                    true, 2, 1},
+    [APP_PC_MONITOR]    = {"电脑监视",     "PC",    &ui_img_icon_monitor,  true,  2, 1},
 };
 
 typedef struct
@@ -475,7 +475,7 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     lv_label_set_text(home_context.app_items[APP_FILE_MANAGER].button_icon_label, "FILE");
 #else
     home_context.app_items[APP_FILE_MANAGER].button_icon_img = lv_img_create(home_context.app_items[APP_FILE_MANAGER].button_icon);
-    lv_img_set_src(home_context.app_items[APP_FILE_MANAGER].button_icon_img, &ui_img_icon_folder48);
+    lv_img_set_src(home_context.app_items[APP_FILE_MANAGER].button_icon_img, &ui_img_icon_filemanager);
     lv_obj_center(home_context.app_items[APP_FILE_MANAGER].button_icon_img);
 #endif
     home_context.app_items[APP_FILE_MANAGER].button_label = lv_label_create(home_context.app_items[APP_FILE_MANAGER].button);
@@ -559,7 +559,7 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     lv_label_set_text(home_context.app_items[APP_DAPLINK].button_icon_label, "DAP");
 #else
     home_context.app_items[APP_DAPLINK].button_icon_img = lv_img_create(home_context.app_items[APP_DAPLINK].button_icon);
-    lv_img_set_src(home_context.app_items[APP_DAPLINK].button_icon_img, &ui_img_icon_debug);
+    lv_img_set_src(home_context.app_items[APP_DAPLINK].button_icon_img, &ui_img_icon_daplink);
     lv_obj_center(home_context.app_items[APP_DAPLINK].button_icon_img);
 #endif
     home_context.app_items[APP_DAPLINK].button_label = lv_label_create(home_context.app_items[APP_DAPLINK].button);
@@ -655,11 +655,19 @@ static void ui_home_create_app_launcher(lv_obj_t *parent)
     home_context.app_items[APP_PC_MONITOR].button_icon = lv_obj_create(
         home_context.app_items[APP_PC_MONITOR].button);
     lv_obj_set_style_pad_all(home_context.app_items[APP_PC_MONITOR].button_icon, 0, 0);
+#ifdef APP_USE_TEXT
     home_context.app_items[APP_PC_MONITOR].button_icon_label = lv_label_create(
         home_context.app_items[APP_PC_MONITOR].button_icon);
     lv_obj_set_style_text_font(home_context.app_items[APP_PC_MONITOR].button_icon_label,
                                &ui_font_chinese_24_4, 0);
     lv_obj_center(home_context.app_items[APP_PC_MONITOR].button_icon_label);
+#else
+    home_context.app_items[APP_PC_MONITOR].button_icon_img = lv_img_create(
+        home_context.app_items[APP_PC_MONITOR].button_icon);
+    lv_img_set_src(home_context.app_items[APP_PC_MONITOR].button_icon_img,
+                   &ui_img_icon_monitor);
+    lv_obj_center(home_context.app_items[APP_PC_MONITOR].button_icon_img);
+#endif
     home_context.app_items[APP_PC_MONITOR].button_label = lv_label_create(
         home_context.app_items[APP_PC_MONITOR].button);
     lv_obj_set_style_text_font(home_context.app_items[APP_PC_MONITOR].button_label,

@@ -495,9 +495,14 @@
               <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_calculator.c</FilePath>
             </File>
             <File>
-              <FileName>ui_img_icon_debug.c</FileName>
+              <FileName>ui_img_icon_daplink.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_debug.c</FilePath>
+              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_daplink.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_img_icon_filemanager.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_filemanager.c</FilePath>
             </File>
             <File>
               <FileName>ui_img_icon_folder48.c</FileName>
@@ -508,6 +513,11 @@
               <FileName>ui_img_icon_file32.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_file32.c</FilePath>
+            </File>
+            <File>
+              <FileName>ui_img_icon_monitor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\App\LVGL\assets\images\ui_img_icon_monitor.c</FilePath>
             </File>
             <File>
               <FileName>ui_img_icon_music.c</FileName>

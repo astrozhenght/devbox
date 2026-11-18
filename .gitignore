@@ -38,6 +38,8 @@
 
 # Build outputs
 /Build/
+/output/
+/Bak/
 
 # Local tests
 /Tests/
