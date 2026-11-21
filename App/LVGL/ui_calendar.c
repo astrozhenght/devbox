@@ -121,7 +121,7 @@ static lv_obj_t* calendar_create_month_button(const char *symbol)
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0xEAF0F7), 0);
     lv_obj_set_style_text_color(button, lv_color_hex(CALENDAR_COLOR_TEXT), 0);
-    lv_obj_set_style_text_font(button, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(button, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_bg_color(button, lv_palette_main(LV_PALETTE_BLUE), LV_STATE_PRESSED);
     lv_obj_set_style_text_color(button, lv_color_white(), LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(button, lv_color_hex(0xEDF1F5), LV_STATE_DISABLED);

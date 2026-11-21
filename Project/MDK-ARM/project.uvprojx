@@ -21,7 +21,7 @@
           <Cpu>IRAM(0x20000000-0x2001FFFF) IRAM2(0x24000000-0x2407FFFF) IROM(0x8000000-0x81FFFFF) CLOCK(12000000) FPU3(DFPU) CPUTYPE("Cortex-M7") ELITTLE TZ</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
           <StartupFile></StartupFile>
-          <FlashDriverDll></FlashDriverDll>
+          <FlashDriverDll>UL2V8M(-S0 -C0 -P0 -FD20000000 -FC8000 -FN2 -FF0STM32H7x_2048 -FS08000000 -FL0200000 -FF1FK743M5_XIH6_V0 -FS190000000 -FL1800000 -FP0($$Device:STM32H743XIHx$CMSIS\Flash\STM32H7x_2048.FLM) -FP1(D:\Keil_v5\ARM\Flash\FK743M5_XIH6_V0.FLM))</FlashDriverDll>
           <DeviceId>0</DeviceId>
           <RegisterFile></RegisterFile>
           <MemoryEnv></MemoryEnv>
@@ -445,24 +445,9 @@
               <FilePath>..\..\App\LVGL\assets\fonts\ui_font_chinese_24_4.c</FilePath>
             </File>
             <File>
-              <FileName>ui_font_chinese_32_1.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\App\LVGL\assets\fonts\ui_font_chinese_32_1.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_font_chinese_32_2.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\App\LVGL\assets\fonts\ui_font_chinese_32_2.c</FilePath>
-            </File>
-            <File>
               <FileName>ui_font_chinese_32_4.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\App\LVGL\assets\fonts\ui_font_chinese_32_4.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_font_chinese_32_8.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\App\LVGL\assets\fonts\ui_font_chinese_32_8.c</FilePath>
             </File>
             <File>
               <FileName>ui_font_chinese_48_1.c</FileName>

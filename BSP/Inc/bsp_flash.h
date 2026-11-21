@@ -18,6 +18,9 @@ typedef enum {
     BSP_FLASH_ERROR_INVALID_ARGUMENT,  // 参数无效
     BSP_FLASH_ERROR_OUT_OF_RANGE,      // 地址超出范围
     BSP_FLASH_ERROR_ID_MISMATCH,       // 读取到的ID与预期不匹配
+    BSP_FLASH_ERROR_QUAD_ENABLE,       // Quad Enable 位设置或回读失败
+    BSP_FLASH_ERROR_VERIFY,            // 间接读取与内存映射读取结果不一致
+    BSP_FLASH_ERROR_XIP_EXECUTION,     // 外部Flash中的XIP探针执行结果错误
 } bsp_flash_result_t;
 
 bsp_flash_result_t bsp_flash_init(void);   // W25Q初始化

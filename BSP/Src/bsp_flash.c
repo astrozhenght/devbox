@@ -56,10 +56,13 @@
 #define W25Q_CMD_QUAD_INPUT_PAGE_PROGRAM  0x32U  // 1-1-4模式下(1线指令1线地址4线数据)，页编程指令，参考写入时间 0.4ms
 #define W25Q_CMD_FAST_READ_QUAD_IO        0xEBU  // 1-4-4模式下(1线指令4线地址4线数据)，快速读取指令
 #define W25Q_CMD_READ_STATUS_REG1         0x05U  // 读状态寄存器1
+#define W25Q_CMD_READ_STATUS_REG2         0x35U  // 读状态寄存器2
+#define W25Q_CMD_WRITE_STATUS_REG2        0x31U  // 写状态寄存器2
 
 /* 状态寄存器1位掩码 */
 #define W25Q_STATUS_REG1_BUSY_Msk         0x01U  // 读状态寄存器1的第0位（只读），Busy标志位，当正在擦除/写入数据/写命令时会被置1
 #define W25Q_STATUS_REG1_WEL_Msk          0x02U  // 读状态寄存器1的第1位（只读），WEL写使能标志位，该标志位为1时，代表可以进行写操作
+#define W25Q_STATUS_REG2_QE_Msk           0x02U  // 状态寄存器2的QE位，置1后允许使用IO2/IO3进行四线传输
 
 /* W25Q64设备参数 */
 #define W25Q_PAGE_SIZE                    256U          // 页大小，256字节
@@ -67,18 +70,36 @@
 #define W25Q_JEDEC_ID                     0xEF4017UL    // W25Q64 ID
 #define W25Q_CHIP_ERASE_TIMEOUT_MS        100000UL      // 超时等待时间，W25Q64整片擦除所需最大时间是100S
 #define W25Q_MEMORY_MAPPED_ADDRESS        0x90000000UL  // 内存映射模式的地址
+#define W25Q_QUAD_READ_MODE_BYTE          0xFFU         // 禁止连续读取模式，每次访问都重新发送0xEB指令
+#define W25Q_QUAD_READ_DUMMY_CYCLES       4U            // 0xEB发送8位Mode Byte后还需要4个Dummy Cycle
+#define W25Q_MEMORY_MAPPED_VERIFY_SIZE    32U           // 启动时比较间接读取与映射读取的字节数
+#define W25Q_XIP_PROBE_INPUT              0x13579BDFUL   // XIP执行探针输入值
+#define W25Q_XIP_PROBE_MASK               0xA5A55A5AUL   // XIP执行探针异或掩码
 
 // 内部函数声明
 static bsp_flash_result_t bsp_flash_reset(void);
 static bsp_flash_result_t bsp_flash_write_enable(void);
 static bsp_flash_result_t bsp_flash_wait_ready(uint32_t timeout_ms);
 static bsp_flash_result_t bsp_flash_write_page(uint8_t *buffer, uint32_t address, uint16_t size);
+static bsp_flash_result_t bsp_flash_read_status_register(uint8_t instruction, uint8_t *status);
+static bsp_flash_result_t bsp_flash_enable_quad_mode(void);
+static void bsp_flash_configure_quad_read(QSPI_CommandTypeDef *command);
+
+/* 此函数由scatter文件放入0x90000000区域，用于确认CPU能够从QSPI取指执行。 */
+__attribute__((section(".xip_text"), noinline, used))
+static uint32_t bsp_flash_xip_probe(uint32_t value)
+{
+    return value ^ W25Q_XIP_PROBE_MASK;
+}
 
 
 bsp_flash_result_t bsp_flash_init(void)
 {
     uint32_t flash_id = 0U;  // 器件ID
+    uint8_t indirect_data[W25Q_MEMORY_MAPPED_VERIFY_SIZE];
+    const volatile uint8_t *mapped_data = (const volatile uint8_t *)W25Q_MEMORY_MAPPED_ADDRESS;
     bsp_flash_result_t result;
+    uint32_t index;
 
     if (platform_qspi_init() != HAL_OK)
     {
@@ -97,14 +118,156 @@ bsp_flash_result_t bsp_flash_init(void)
         return result;
     }
 
-    if (flash_id == W25Q_JEDEC_ID) // 进行匹配
+    if (flash_id != W25Q_JEDEC_ID)
     {
-        return BSP_FLASH_OK;  // 返回成功标志
+        return BSP_FLASH_ERROR_ID_MISMATCH;
     }
-    else
+
+    /* 0xEB和0x32都使用四线数据，必须先设置并回读QE位。 */
+    result = bsp_flash_enable_quad_mode();
+    if (result != BSP_FLASH_OK)
     {
-        return BSP_FLASH_ERROR_ID_MISMATCH;   // 返回错误
+        return result;
     }
+
+    /* 先保留一份间接模式读数，再与0x90000000映射窗口逐字节比较。 */
+    result = bsp_flash_read(indirect_data, 0U, sizeof(indirect_data));
+    if (result != BSP_FLASH_OK)
+    {
+        return result;
+    }
+
+    result = bsp_flash_enable_memory_mapped();
+    if (result != BSP_FLASH_OK)
+    {
+        return result;
+    }
+
+    for (index = 0U; index < sizeof(indirect_data); index++)
+    {
+        if (mapped_data[index] != indirect_data[index])
+        {
+            (void)bsp_flash_disable_memory_mapped();
+            return BSP_FLASH_ERROR_VERIFY;
+        }
+    }
+
+    /* 数据映射验证通过后再跳转到外部Flash，验证真正的XIP取指链路。 */
+    if (bsp_flash_xip_probe(W25Q_XIP_PROBE_INPUT) !=
+        (W25Q_XIP_PROBE_INPUT ^ W25Q_XIP_PROBE_MASK))
+    {
+        return BSP_FLASH_ERROR_XIP_EXECUTION;
+    }
+
+    return BSP_FLASH_OK;
+}
+
+/* 读取指定状态寄存器，供QE设置和回读校验共用。 */
+static bsp_flash_result_t bsp_flash_read_status_register(uint8_t instruction, uint8_t *status)
+{
+    QSPI_CommandTypeDef command = {0};
+
+    if (status == NULL)
+    {
+        return BSP_FLASH_ERROR_INVALID_ARGUMENT;
+    }
+
+    command.InstructionMode = QSPI_INSTRUCTION_1_LINE;
+    command.Instruction = instruction;
+    command.AddressMode = QSPI_ADDRESS_NONE;
+    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+    command.DataMode = QSPI_DATA_1_LINE;
+    command.NbData = 1U;
+    command.DummyCycles = 0U;
+    command.DdrMode = QSPI_DDR_MODE_DISABLE;
+    command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;
+    command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;
+
+    if (HAL_QSPI_Command(&hqspi, &command, HAL_QPSI_TIMEOUT_DEFAULT_VALUE) != HAL_OK)
+    {
+        return BSP_FLASH_ERROR_TRANSMIT;
+    }
+
+    if (HAL_QSPI_Receive(&hqspi, status, HAL_QPSI_TIMEOUT_DEFAULT_VALUE) != HAL_OK)
+    {
+        return BSP_FLASH_ERROR_TRANSMIT;
+    }
+
+    return BSP_FLASH_OK;
+}
+
+/* 设置W25Q64JV状态寄存器2的QE位，并通过回读确认设置已经生效。 */
+static bsp_flash_result_t bsp_flash_enable_quad_mode(void)
+{
+    QSPI_CommandTypeDef command = {0};
+    bsp_flash_result_t result;
+    uint8_t status_reg2;
+
+    result = bsp_flash_read_status_register(W25Q_CMD_READ_STATUS_REG2, &status_reg2);
+    if (result != BSP_FLASH_OK)
+    {
+        return result;
+    }
+
+    if ((status_reg2 & W25Q_STATUS_REG2_QE_Msk) != 0U)
+    {
+        return BSP_FLASH_OK;
+    }
+
+    result = bsp_flash_write_enable();
+    if (result != BSP_FLASH_OK)
+    {
+        return result;
+    }
+
+    status_reg2 |= W25Q_STATUS_REG2_QE_Msk;
+    command.InstructionMode = QSPI_INSTRUCTION_1_LINE;
+    command.Instruction = W25Q_CMD_WRITE_STATUS_REG2;
+    command.AddressMode = QSPI_ADDRESS_NONE;
+    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+    command.DataMode = QSPI_DATA_1_LINE;
+    command.NbData = 1U;
+    command.DummyCycles = 0U;
+    command.DdrMode = QSPI_DDR_MODE_DISABLE;
+    command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;
+    command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;
+
+    if ((HAL_QSPI_Command(&hqspi, &command, HAL_QPSI_TIMEOUT_DEFAULT_VALUE) != HAL_OK) ||
+        (HAL_QSPI_Transmit(&hqspi, &status_reg2, HAL_QPSI_TIMEOUT_DEFAULT_VALUE) != HAL_OK))
+    {
+        return BSP_FLASH_ERROR_QUAD_ENABLE;
+    }
+
+    result = bsp_flash_wait_ready(HAL_QPSI_TIMEOUT_DEFAULT_VALUE);
+    if (result != BSP_FLASH_OK)
+    {
+        return result;
+    }
+
+    result = bsp_flash_read_status_register(W25Q_CMD_READ_STATUS_REG2, &status_reg2);
+    if ((result != BSP_FLASH_OK) || ((status_reg2 & W25Q_STATUS_REG2_QE_Msk) == 0U))
+    {
+        return BSP_FLASH_ERROR_QUAD_ENABLE;
+    }
+
+    return BSP_FLASH_OK;
+}
+
+/* 统一配置0xEB的指令、地址、Mode Byte和Dummy Cycle，避免两种读取模式时序不一致。 */
+static void bsp_flash_configure_quad_read(QSPI_CommandTypeDef *command)
+{
+    command->InstructionMode = QSPI_INSTRUCTION_1_LINE;
+    command->Instruction = W25Q_CMD_FAST_READ_QUAD_IO;
+    command->AddressMode = QSPI_ADDRESS_4_LINES;
+    command->AddressSize = QSPI_ADDRESS_24_BITS;
+    command->AlternateByteMode = QSPI_ALTERNATE_BYTES_4_LINES;
+    command->AlternateBytesSize = QSPI_ALTERNATE_BYTES_8_BITS;
+    command->AlternateBytes = W25Q_QUAD_READ_MODE_BYTE;
+    command->DataMode = QSPI_DATA_4_LINES;
+    command->DummyCycles = W25Q_QUAD_READ_DUMMY_CYCLES;
+    command->DdrMode = QSPI_DDR_MODE_DISABLE;
+    command->DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;
+    command->SIOOMode = QSPI_SIOO_INST_EVERY_CMD;
 }
 
 /*************************************************************************************************
@@ -253,21 +416,10 @@ bsp_flash_result_t bsp_flash_enable_memory_mapped(void)
     QSPI_CommandTypeDef command = {0};     // QSPI传输配置
     QSPI_MemoryMappedTypeDef config = {0}; // 内存映射访问参数
 
-    command.InstructionMode = QSPI_INSTRUCTION_1_LINE;     // 1线指令模式
-    command.AddressSize = QSPI_ADDRESS_24_BITS;            // 24位地址
-    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE; // 无交替字节
-    command.DdrMode = QSPI_DDR_MODE_DISABLE;               // 禁止DDR模式
-    command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;  // DDR模式中数据延迟，这里用不到
-    command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;           // 每次传输数据都发送指令
-    command.AddressMode = QSPI_ADDRESS_4_LINES;            // 4线地址模式
-    command.DataMode = QSPI_DATA_4_LINES;                  // 4线数据模式
-    command.DummyCycles = 6;                               // 空周期个数
-    command.Instruction = W25Q_CMD_FAST_READ_QUAD_IO;      // 1-4-4模式下(1线指令4线地址4线数据)，快速读取指令
+    bsp_flash_configure_quad_read(&command);
 
     config.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE; // 禁用超时计数器, nCS 保持激活状态
     config.TimeOutPeriod = 0; // 超时判断周期
-
-    bsp_flash_reset(); // 复位W25Qxx
 
     if (HAL_QSPI_MemoryMapped(&hqspi, &command, &config) != HAL_OK) // 进行配置
     {
@@ -275,6 +427,16 @@ bsp_flash_result_t bsp_flash_enable_memory_mapped(void)
     }
 
     return BSP_FLASH_OK; // 配置成功
+}
+
+bsp_flash_result_t bsp_flash_disable_memory_mapped(void)
+{
+    if (HAL_QSPI_Abort(&hqspi) != HAL_OK)
+    {
+        return BSP_FLASH_ERROR_MEMORY_MAPPED;
+    }
+
+    return BSP_FLASH_OK;
 }
 
 /*************************************************************************************************
@@ -747,18 +909,9 @@ bsp_flash_result_t bsp_flash_read(uint8_t *buffer, uint32_t address, uint32_t si
         return BSP_FLASH_ERROR_OUT_OF_RANGE;
     }
 
-    command.InstructionMode = QSPI_INSTRUCTION_1_LINE;     // 1线指令模式
-    command.AddressSize = QSPI_ADDRESS_24_BITS;            // 24位地址
-    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE; // 无交替字节
-    command.DdrMode = QSPI_DDR_MODE_DISABLE;               // 禁止DDR模式
-    command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;  // DDR模式中数据延迟，这里用不到
-    command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;           // 每次传输数据都发送指令
-    command.AddressMode = QSPI_ADDRESS_4_LINES;            // 4线地址模式
-    command.DataMode = QSPI_DATA_4_LINES;                  // 4线数据模式
-    command.DummyCycles = 6;                               // 空周期个数
+    bsp_flash_configure_quad_read(&command);
     command.NbData = size;                                 // 数据长度，最大不能超过flash芯片的大小
     command.Address = address;                             // 要读取 W25Qxx 的地址
-    command.Instruction = W25Q_CMD_FAST_READ_QUAD_IO;      // 1-4-4模式下(1线指令4线地址4线数据)，快速读取指令
 
     // 发送读取命令
     if (HAL_QSPI_Command(&hqspi, &command, HAL_QPSI_TIMEOUT_DEFAULT_VALUE) != HAL_OK)

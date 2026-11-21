@@ -181,7 +181,7 @@ static void ui_home_create_status_bar(lv_obj_t *parent)
     lv_label_set_text(home_context.status_bar_fps_label, "FPS:--");
 
     home_context.status_bar_wifi_icon = lv_label_create(home_context.system_status_bar);
-    lv_obj_set_style_text_font(home_context.status_bar_wifi_icon, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(home_context.status_bar_wifi_icon, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(home_context.status_bar_wifi_icon, lv_palette_main(LV_PALETTE_BLUE), 0);
     lv_label_set_text(home_context.status_bar_wifi_icon, LV_SYMBOL_WIFI);
 

@@ -6,6 +6,8 @@ LR_IROM1 0x08000000 0x00200000  {    ; 2MB load region size_region
   ER_IROM1 0x08000000 0x00200000  {  ; 2MB load address = execution address
    *.o (RESET, +First)
    *(InRoot$$Sections)
+   ; 主界面和多数App高频使用的24px字体保留在内部Flash，避免QSPI随机读取带来的延迟。
+   ui_font_chinese_24_4.o (+RO)
    .ANY (+RO)
    .ANY (+XO)
   }
@@ -35,6 +37,18 @@ LR_IROM1 0x08000000 0x00200000  {    ; 2MB load region size_region
   
   RW_BKSRAM 0x38800000 0x00001000  {  ; RW data : 4KB BKSRAM
     .ANY(.bksram)
+  }
+}
+
+; 外部W25Q64独立加载区：由FK743M5_XIH6_V0.FLM写入，运行时从0x90000000直接取指。
+LR_XIP 0x90000000 0x00800000  {
+  ER_XIP 0x90000000 0x00800000  {
+    ; 除24px主字体外，仅迁移资源对象的RO段；字体glyph cache等RW/ZI数据仍由内部RAM区域接收。
+    ui_font_*.o (+RO)
+    lv_font_montserrat_*.o (+RO)
+    ui_img_*.o (+RO)
+    .ANY(.xip_text)
+    .ANY(.xip_rodata)
   }
 }
 

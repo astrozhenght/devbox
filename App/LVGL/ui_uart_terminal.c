@@ -589,8 +589,8 @@ static lv_obj_t* uart_ui_parameter(lv_obj_t* parent, const char* title, const ch
     lv_obj_set_style_radius(dropdown, 6, 0);
     lv_obj_set_style_border_color(dropdown, lv_color_hex(UART_UI_BORDER), 0);
     lv_obj_set_style_text_font(dropdown, &ui_font_chinese_24_4, 0);
-    /* 箭头使用现有图标字体，参数及列表文字仍统一24px。 */
-    lv_obj_set_style_text_font(dropdown, &lv_font_montserrat_22, LV_PART_INDICATOR);
+    /* 下拉箭头与参数文字统一使用24px中文字库。 */
+    lv_obj_set_style_text_font(dropdown, &ui_font_chinese_24_4, LV_PART_INDICATOR);
     lv_dropdown_set_options(dropdown, options);
     lv_dropdown_set_selected(dropdown, selected);
     lv_obj_t* list = lv_dropdown_get_list(dropdown);
