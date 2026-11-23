@@ -9,6 +9,7 @@
 #include "ui_calculator.h"
 #include "ui_daplink.h"
 #include "ui_pc_monitor.h"
+#include "ui_music.h"
 #include "system_monitor.h"
 #include "ui_images.h"
 #include "ui_fonts.h"
@@ -55,7 +56,7 @@ static const ui_home_app_descriptor_t app_descriptors[APP_COUNT] =
     [APP_UART_TERMINAL] = {"串口助手",     "UART",  &ui_img_icon_uart,     true,  0, 0},
     [APP_FILE_MANAGER]  = {"文件管理",     "FILE",  &ui_img_icon_filemanager, true,  1, 0},
     [APP_SETTINGS]      = {"设置",         "SET",   &ui_img_icon_setting,  false, 5, 0},
-    [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    false, 0, 1},
+    [APP_MUSIC]         = {"音乐",         "MUSIC", &ui_img_icon_music,    true, 0, 1},
     [APP_DAPLINK]       = {"DAP Link",     "DAP",   &ui_img_icon_daplink,  true,  1, 1},
     [APP_WEATHER]       = {"天气",         "WEA",   &ui_img_icon_weather,  true,  2, 0},
     [APP_CALENDAR]      = {"日历",         "CAL",   &ui_img_icon_calendar, true,  3, 0},
@@ -781,6 +782,10 @@ static void ui_home_app_click_event_cb(lv_event_t *event)
     else if (target == home_context.app_items[APP_WEATHER].button_icon)
     {
         ui_weather_create(lv_scr_act());
+    }
+    else if (target == home_context.app_items[APP_MUSIC].button_icon)
+    {
+        ui_music_create(lv_scr_act());
     }
     else if (target == home_context.app_items[APP_CALENDAR].button_icon) // 打开日历
     {

@@ -5,9 +5,11 @@
 #include "file_task.h"
 #include "dap_task.h"
 #include "pc_monitor_task.h"
+#include "music_service.h"
 
 bool app_tasks_create(void)
 {
+    if (!music_service_create()) return false;
     if (!file_task_create())
     {
         return false;

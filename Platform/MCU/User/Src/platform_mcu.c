@@ -9,7 +9,7 @@
 HAL_StatusTypeDef platform_mcu_init(void)
 {
     platform_dma_init();    // DMA初始化，usart1和usart6需要使用DMA
-    platform_gpio_init();   // GPIO初始化，仅调试使用
+    // platform_gpio_init();   // GPIO初始化，仅调试使用
     if (platform_sdram_init() != HAL_OK)
     {
         return HAL_ERROR;

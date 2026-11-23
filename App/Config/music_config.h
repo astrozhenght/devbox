@@ -1,0 +1,25 @@
+#ifndef MUSIC_CONFIG_H
+#define MUSIC_CONFIG_H
+
+/* 模块接线已确认，允许初始化VS1053B和SAI采样。 */
+#ifndef MUSIC_HARDWARE_CONFIRMED
+#define MUSIC_HARDWARE_CONFIRMED 1
+#endif
+#define MUSIC_DIRECTORY "SD:/Music"
+#define MUSIC_MAX_TRACKS 32U
+#define MUSIC_FFT_SIZE 1024U
+#define MUSIC_SPECTRUM_BANDS 32U
+#define MUSIC_SAMPLE_RATE 48000U
+#define MUSIC_RAM __attribute__((section(".axisram"), aligned(32)))
+
+/* 已确认接线：SPI2 PB13/14/15；片选PB10/11；复位PA4；DREQ PI9。
+ * SAI1_A PE5/PE4/PE6。 */
+#define MUSIC_CS_PORT GPIOB
+#define MUSIC_CS_PIN GPIO_PIN_10
+#define MUSIC_DCS_PORT GPIOB
+#define MUSIC_DCS_PIN GPIO_PIN_11
+#define MUSIC_RESET_PORT GPIOA
+#define MUSIC_RESET_PIN GPIO_PIN_4
+#define MUSIC_DREQ_PORT GPIOI
+#define MUSIC_DREQ_PIN GPIO_PIN_9
+#endif

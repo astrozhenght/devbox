@@ -1,5 +1,6 @@
 #include "file_task.h"
 #include "file_service_port.h"
+#include "music_storage.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -72,6 +73,7 @@ static bool emit_result(const file_service_event_t *event, void *user)
         return active_id == event->request_id;
     while (active_id == event->request_id)
     {
+        music_storage_poll(); /* UI结果队列背压时仍允许音频预读推进。 */
         if (xQueueSend(result_queue, event, pdMS_TO_TICKS(20)) == pdPASS) return true;
     }
     return false;
@@ -94,7 +96,8 @@ static void file_task_entry(void *argument)
     (void)argument;
     for (;;)
     {
-        if (xQueueReceive(request_queue, &request, portMAX_DELAY) != pdPASS) continue;
+        music_storage_poll();
+        if (xQueueReceive(request_queue, &request, pdMS_TO_TICKS(2)) != pdPASS) continue;
         switch (request.kind)
         {
             case FILE_REQUEST_LIST:

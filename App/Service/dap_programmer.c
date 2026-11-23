@@ -1,4 +1,5 @@
 #include "dap_programmer.h"
+#include "music_service.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -453,6 +454,11 @@ bool dap_programmer_process(void)
     dap_service_set_local_active(true);
     dap_service_flush_requests();
 
+    if (!music_service_suspend_for_programming())
+    {
+        strcpy(error, "等待音乐文件关闭超时");
+        goto finish;
+    }
     flm_result = flm_parser_load(requested_flm, &algorithm);
     if (flm_result != FLM_PARSER_OK)
     {
@@ -674,6 +680,7 @@ finish:
     }
     dap_service_flush_requests();
     dap_service_set_local_active(false);
+    music_service_resume_after_programming();
     taskENTER_CRITICAL();
     programmer_status.elapsed_ms = (uint32_t)(((uint64_t)
         (xTaskGetTickCount() - programmer_start_tick) * 1000U) / configTICK_RATE_HZ);

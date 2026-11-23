@@ -1,4 +1,5 @@
 #include "file_service_port.h"
+#include "music_storage.h"
 #include "ff.h"
 #include "ff_gen_drv.h"
 #include "sd_diskio_dma.h"
@@ -108,6 +109,8 @@ file_service_status_t file_port_mount(void)
         linked = true;
     }
     if (mounted && disk_status(0) == 0U) return FILE_SERVICE_OK;
+    /* 拔卡后先使音乐句柄关闭，避免重挂载使正在使用的对象失效。 */
+    if (music_storage_active() || directory_open || file_open) return FILE_SERVICE_NOT_READY;
     (void)f_mount(NULL, FILE_SERVICE_ROOT, 0);
     disk.is_initialized[0] = 0U;
     FRESULT result = f_mount(&filesystem, FILE_SERVICE_ROOT, 1);
@@ -208,7 +211,12 @@ file_service_status_t file_port_stat(const char *path, file_service_entry_t *ent
  * Context: 文件任务串行调用，可能写入磁盘，不可在中断或UI事件回调中直接调用。
  * Return: 删除成功返回%FILE_SERVICE_OK，否则返回转换后的服务状态。
  */
-file_service_status_t file_port_remove(const char *path) { return translate(f_unlink(path)); }
+file_service_status_t file_port_remove(const char *path)
+{
+    /* 播放期间禁止删除；包括父目录，防止递归删除破坏当前曲目。 */
+    if (music_storage_active()) return FILE_SERVICE_DENIED;
+    return translate(f_unlink(path));
+}
 
 file_service_status_t file_port_open_file(const char *path, uint32_t *size_bytes)
 {
@@ -276,4 +284,8 @@ int32_t file_port_last_error(void) { return (int32_t)last_error; }
  *
  * Context: 调度器已运行且允许阻塞的文件任务上下文，不可在中断中调用。
  */
-void file_port_yield(void) { vTaskDelay(pdMS_TO_TICKS(1)); }
+void file_port_yield(void)
+{
+    music_storage_poll(); /* 目录长遍历的合作调度点；仍由文件任务执行FatFS。 */
+    vTaskDelay(pdMS_TO_TICKS(1));
+}

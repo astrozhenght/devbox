@@ -33,6 +33,11 @@
 #include "bsp_wifi.h"
 #include "lvgl.h"
 #include "ltdc.h"
+#include "music_audio.h"
+
+/* 音频接收中断只推进HAL/DMA状态，频谱计算由后台任务执行。 */
+void DMA2_Stream0_IRQHandler(void) { platform_music_dma_irq(); }
+void SAI1_IRQHandler(void) { platform_music_sai_irq(); }
 
 /* USER CODE END Includes */
 
