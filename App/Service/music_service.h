@@ -12,7 +12,7 @@ typedef enum
 typedef enum
 {
     MUSIC_SCAN, MUSIC_PLAY, MUSIC_TOGGLE, MUSIC_PREVIOUS,
-    MUSIC_NEXT, MUSIC_STOP, MUSIC_VOLUME, MUSIC_MODE
+    MUSIC_NEXT, MUSIC_STOP, MUSIC_VOLUME, MUSIC_MODE, MUSIC_SEEK
 } music_command_t;
 typedef enum
 {
@@ -27,15 +27,18 @@ typedef struct
     uint16_t count;
     uint8_t volume;
     uint8_t mode; /* music_play_mode_t。 */
-    uint32_t seconds;
+    uint32_t seconds; /* 解码计时加最近一次定位的目标秒数。 */
     uint32_t duration_seconds; /* 文件头时长；0表示无法识别。 */
     bool duration_estimated; /* 无帧数信息的MP3按码率估算，UI加~区分。 */
     uint32_t playlist_version;
     char title[MUSIC_NAME_CAP];
     char message[96];
+    uint32_t playback_id; /* 每次打开曲目后更新，用于拒绝过期的定位命令。 */
+    bool seekable; /* 文件已建立用于定位的元数据。 */
 } music_snapshot_t;
 bool music_service_create(void);
 bool music_service_command(music_command_t command, uint32_t value);
+bool music_service_seek(uint32_t playback_id, uint32_t seconds);
 void music_service_snapshot(music_snapshot_t *snapshot);
 bool music_service_track_name(uint16_t index, char *name, unsigned capacity);
 /* 本地烧录前请求停播并等待文件关闭；只在任务上下文调用。 */

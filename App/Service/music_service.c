@@ -8,7 +8,7 @@
 #include "queue.h"
 #include <string.h>
 
-typedef struct { music_command_t kind; uint32_t value; } command_t;
+typedef struct { music_command_t kind; uint32_t value; uint32_t playback_id; } command_t;
 static QueueHandle_t commands;
 static MUSIC_RAM music_track_t tracks[MUSIC_MAX_TRACKS];
 static MUSIC_RAM music_track_t scan_tracks[MUSIC_MAX_TRACKS];
@@ -79,12 +79,32 @@ bool music_service_track_name(uint16_t index, char *name, unsigned capacity)
  * @kind: 命令类型
  * @value: 播放命令的曲目索引、音量命令的百分比或模式命令的枚举值
  *
+ * 定位须通过 music_service_seek() 附带曲目会话编号。
+ *
  * Context: 任务上下文。不等待队列空位或命令执行完成。
  * Return: 入队成功返回 %true，队列未创建、队列已满或烧录暂停期间返回 %false。
  */
 bool music_service_command(music_command_t kind, uint32_t value)
 {
-    command_t cmd = {kind, value};
+    command_t cmd = {.kind = kind, .value = value};
+    if (commands == NULL || programming) return false;
+    return xQueueSend(commands, &cmd, 0) == pdPASS;
+}
+
+/**
+ * music_service_seek() - 提交指定播放会话的定位请求
+ * @playback_id: 拖动开始时取得的播放快照会话编号
+ * @seconds: 目标整秒数，须小于该曲目的总时长
+ *
+ * 音乐任务处理时检查播放文件、定位支持和会话编号，忽略过期
+ * 或无效的请求。成功定位后保持原播放或暂停状态。
+ *
+ * Context: 任务上下文，不等待队列空位或定位完成。
+ * Return: 请求已入队返回 %true，队列不可用、已满或处于烧录暂停期间返回 %false。
+ */
+bool music_service_seek(uint32_t playback_id, uint32_t seconds)
+{
+    command_t cmd = {.kind = MUSIC_SEEK, .value = seconds, .playback_id = playback_id};
     if (commands == NULL || programming) return false;
     return xQueueSend(commands, &cmd, 0) == pdPASS;
 }
@@ -174,6 +194,8 @@ void music_service_resume_after_programming(void) { programming = false; }
  *
  * 音乐任务负责播放状态和 VS1053 访问，FatFS 由文件任务操作。
  * 播放时交替使用两块缓冲区，只有在取回预读结果后才切换到下一块。
+ * 定位时收回预读并结束旧解码流，由文件任务移动读位置。
+ * 定位成功后以目标秒数为基准累加芯片的解码时间。
  *
  * Context: FreeRTOS 音乐任务入口，可等待命令、文件结果或 DREQ，不返回。
  */
@@ -185,6 +207,7 @@ static void music_entry(void *argument)
     TickType_t last_ready = 0;
     TickType_t last_clock = 0;
     TickType_t last_send = 0;
+    uint32_t seek_base = 0;
     state.volume = 50;
     state.state = MUSIC_IDLE;
     strcpy(state.message, MUSIC_HARDWARE_CONFIRMED ? "请选择曲目" : "模块接线待确认");
@@ -236,6 +259,37 @@ static void music_entry(void *argument)
             else if (cmd.kind == MUSIC_MODE && cmd.value <= MUSIC_PLAY_MODE_SHUFFLE)
                 state.mode = (uint8_t)cmd.value;
             else if (cmd.kind == MUSIC_STOP) stop(true);
+            else if (cmd.kind == MUSIC_SEEK)
+            {
+                if (!file_open || !state.seekable || cmd.playback_id != state.playback_id ||
+                    cmd.value >= state.duration_seconds) continue;
+
+                /* 与同步定位共用结果队列，先取回预读结果再请求定位。 */
+                if (read_pending)
+                {
+                    file_service_status_t result = music_storage_read_end(NULL);
+                    read_pending = false;
+                    if (result != FILE_SERVICE_OK) { fail("音乐读取失败，请检查SD卡"); continue; }
+                }
+                /* 静音并结束旧流，失败时重新初始化解码器。 */
+                if (!bsp_vs1053_volume(0) || !bsp_vs1053_finish(true))
+                    initialized = bsp_vs1053_init();
+                if (!initialized) { fail("VS1053初始化失败"); continue; }
+                if (music_storage_request(MUSIC_STORAGE_SEEK, NULL, &cmd.value,
+                                          sizeof(cmd.value), NULL) != FILE_SERVICE_OK)
+                { fail("播放定位失败"); continue; }
+                uint8_t volume = state.state == MUSIC_PAUSED ? 0 : state.volume;
+                if (!bsp_vs1053_volume(volume)) { fail("音量设置失败"); continue; }
+
+                amount = position = 0;
+                stream_index = 0;
+                state.seconds = seek_base = cmd.value;
+                last_send = last_ready = last_clock = xTaskGetTickCount();
+                playback_timing.bytes_sent = 0;
+                playback_timing.max_feed_gap = 0;
+                playback_timing.max_read_wait = 0;
+                playback_timing.max_clock_wait = 0;
+            }
             else if (cmd.kind == MUSIC_TOGGLE && file_open)
             {
                 bool pause = state.state == MUSIC_PLAYING;
@@ -262,8 +316,11 @@ static void music_entry(void *argument)
                 file_open = true;
                 state.track = next;
                 state.seconds = 0;
+                seek_base = 0;
                 state.duration_seconds = duration.seconds;
                 state.duration_estimated = duration.estimated;
+                state.seekable = duration.seekable;
+                state.playback_id++;
                 strcpy(state.title, tracks[next].name);
                 state.state = MUSIC_PLAYING;
                 amount = position = 0;
@@ -340,7 +397,7 @@ static void music_entry(void *argument)
             if (!bsp_vs1053_seconds(&seconds)) { fail("解码时间读取失败"); continue; }
             TickType_t clock_wait = xTaskGetTickCount() - clock_start;
             if (clock_wait > playback_timing.max_clock_wait) playback_timing.max_clock_wait = clock_wait;
-            state.seconds = seconds;
+            state.seconds = seek_base + seconds;
             last_clock = xTaskGetTickCount();
             publish();
         }

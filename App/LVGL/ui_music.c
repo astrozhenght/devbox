@@ -31,6 +31,8 @@ typedef struct
     lv_obj_t *progress;
     lv_timer_t *timer;
     uint32_t list_version;
+    uint32_t drag_playback_id;
+    uint32_t drag_duration;
     uint16_t rotation;
     uint16_t list_track;
     music_state_t list_state;
@@ -439,6 +441,56 @@ static void track_row_create(unsigned track, char *name)
     lv_label_set_text(detail, format);
 }
 
+/* 仅在有可定位文件且滑条能表示有效目标秒数时允许拖动。 */
+static bool progress_can_seek(const music_snapshot_t *snapshot)
+{
+    return snapshot->seekable && snapshot->duration_seconds > 1U &&
+           (snapshot->state == MUSIC_PLAYING || snapshot->state == MUSIC_PAUSED);
+}
+
+/* 将千分比四舍五入到整秒，最大值限制在 @duration 前一秒。 */
+static uint32_t progress_target(uint32_t duration)
+{
+    uint32_t seconds = (uint32_t)(((uint64_t)lv_slider_get_value(ui.progress) * duration + 500U) / 1000U);
+    return seconds < duration ? seconds : duration - 1U;
+}
+
+/**
+ * progress_cb() - 预览、取消或提交播放定位
+ * @event: 进度滑条的按下、松手或按压丢失事件
+ *
+ * 按下时保存曲目会话和时长。松手后仅对同一会话提交定位，
+ * 按压丢失时丢弃预览。
+ *
+ * Context: LVGL UI 任务，不等待定位完成。
+ */
+static void progress_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESS_LOST)
+    {
+        ui.drag_duration = 0;
+        return;
+    }
+    music_snapshot_t snapshot;
+    music_service_snapshot(&snapshot);
+    if (code == LV_EVENT_PRESSED)
+    {
+        ui.drag_playback_id = snapshot.playback_id;
+        ui.drag_duration = progress_can_seek(&snapshot) ? snapshot.duration_seconds : 0;
+    }
+    else if (code == LV_EVENT_RELEASED)
+    {
+        if (ui.drag_duration && progress_can_seek(&snapshot) && ui.drag_playback_id == snapshot.playback_id)
+        {
+            uint32_t seconds = progress_target(ui.drag_duration);
+            if (seconds != snapshot.seconds)
+                ui.request_failed = !music_service_seek(ui.drag_playback_id, seconds);
+        }
+        ui.drag_duration = 0;
+    }
+}
+
 static void refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -462,8 +514,13 @@ static void refresh_cb(lv_timer_t *timer)
         if (strcmp(lv_label_get_text(ui.status), status) != 0) lv_label_set_text(ui.status, status);
     }
     else if (lv_label_get_text(ui.status)[0]) lv_label_set_text(ui.status, "");
+    bool seekable = progress_can_seek(&snapshot);
+    if (seekable) lv_obj_clear_state(ui.progress, LV_STATE_DISABLED);
+    else lv_obj_add_state(ui.progress, LV_STATE_DISABLED);
+    if (!seekable || ui.drag_playback_id != snapshot.playback_id) ui.drag_duration = 0;
+    uint32_t elapsed = ui.drag_duration ? progress_target(ui.drag_duration) : snapshot.seconds;
     lv_label_set_text_fmt(ui.time, "%02lu:%02lu",
-                         (unsigned long)(snapshot.seconds / 60), (unsigned long)(snapshot.seconds % 60));
+                         (unsigned long)(elapsed / 60), (unsigned long)(elapsed % 60));
     if (snapshot.duration_seconds)
         lv_label_set_text_fmt(ui.duration, "%s%02lu:%02lu", snapshot.duration_estimated ? "~" : "",
                              (unsigned long)(snapshot.duration_seconds / 60),
@@ -471,7 +528,9 @@ static void refresh_cb(lv_timer_t *timer)
     else lv_label_set_text(ui.duration, "--:--");
     uint32_t progress = snapshot.duration_seconds ?
         (uint32_t)((uint64_t)snapshot.seconds * 1000U / snapshot.duration_seconds) : 0;
-    lv_bar_set_value(ui.progress, progress > 1000U ? 1000 : (int32_t)progress, LV_ANIM_OFF);
+    /* 拖动期间由触控更新滑条，快照只在退出预览后恢复同步。 */
+    if (!ui.drag_duration)
+        lv_slider_set_value(ui.progress, progress > 1000U ? 1000 : (int32_t)progress, LV_ANIM_OFF);
     lv_label_set_text(ui.play_text, snapshot.state == MUSIC_PLAYING ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     if (ui.mode != snapshot.mode % 3)
     {
@@ -711,13 +770,20 @@ void ui_music_create(lv_obj_t *parent)
     ui.time = lv_label_create(timeline);
     lv_obj_set_width(ui.time, 72);
     lv_obj_set_style_text_color(ui.time, lv_color_hex(0x69788B), 0);
-    ui.progress = lv_bar_create(timeline);
+    ui.progress = lv_slider_create(timeline);
     lv_obj_set_size(ui.progress, 0, 6);
     lv_obj_set_flex_grow(ui.progress, 1);
-    lv_bar_set_range(ui.progress, 0, 1000);
+    lv_slider_set_range(ui.progress, 0, 1000);
     lv_obj_set_style_bg_color(ui.progress, lv_color_hex(0xE4EAF1), LV_PART_MAIN);
     lv_obj_set_style_bg_color(ui.progress, lv_color_hex(0x2196F3), LV_PART_INDICATOR);
-    /* 这里只显示播放进度；没有添加尚未实现的拖动定位功能。 */
+    lv_obj_set_style_bg_color(ui.progress, lv_color_hex(0x2196F3), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(ui.progress, 3, LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(ui.progress, LV_OPA_TRANSP, LV_PART_KNOB | LV_STATE_DISABLED);
+    lv_obj_set_ext_click_area(ui.progress, 10);
+    lv_obj_add_state(ui.progress, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(ui.progress, progress_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(ui.progress, progress_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui.progress, progress_cb, LV_EVENT_PRESS_LOST, NULL);
     ui.duration = lv_label_create(timeline);
     lv_obj_set_width(ui.duration, 84);
     lv_obj_set_style_text_align(ui.duration, LV_TEXT_ALIGN_RIGHT, 0);

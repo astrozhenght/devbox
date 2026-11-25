@@ -59,13 +59,36 @@ static bool write_memory(uint16_t address, uint16_t value)
  * bsp_vs1053_volume() - 设置左右声道的输出音量
  * @percent: 0 到 100 的音量百分比，0 对应 SCI_VOL 的 0xFEFE 静音值
  *
+ * SCI_VOL 以 0.5 dB 为步进，左右声道使用相同衰减。
+ * 低音量区间按 1%、10%、25% 和 50% 的控制点分段插值，
+ * 50% 及以上保留原衰减曲线。
+ *
  * Context: 初始化过程中或初始化完成后，由音乐任务调用，可能等待 DREQ。
  * Return: 音量写入成功返回 %true，参数越界或 SCI 访问失败返回 %false。
  */
 bool bsp_vs1053_volume(uint8_t percent)
 {
     if (percent > 100U) return false;
-    uint16_t attenuation = percent == 0 ? 254U : (100U - percent) / 2U;
+    if (percent == 0U) return write_reg(11, 0xFEFEU);
+
+    uint16_t attenuation = (100U - percent) / 2U;
+    if (percent < 50U)
+    {
+        /* SCI_VOL 每步衰减 0.5 dB。 */
+        static const struct
+        {
+            uint8_t percent;
+            uint8_t steps;
+        } curve[] = {{1, 120}, {10, 80}, {25, 50}, {50, 25}};
+
+        unsigned upper = 1;
+        while (percent > curve[upper].percent) upper++;
+        unsigned lower = upper - 1U;
+        unsigned span = curve[upper].percent - curve[lower].percent;
+        unsigned offset = percent - curve[lower].percent;
+        unsigned drop = curve[lower].steps - curve[upper].steps;
+        attenuation = curve[lower].steps - (offset * drop + span / 2U) / span;
+    }
     return write_reg(11, (attenuation << 8) | attenuation);
 }
 
