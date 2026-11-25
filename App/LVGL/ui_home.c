@@ -22,6 +22,7 @@
 #define HOME_UI_PRESSED_COLOR     0xE6F0FF
 #define HOME_UI_DISABLED_TEXT     0xA5AFBC
 #define HOME_UI_PRIMARY_BLUE      0x2196F3
+#define HOME_WEATHER_ICON_SIZE    72U
 
 typedef enum
 {
@@ -237,6 +238,27 @@ static void ui_home_style_card(lv_obj_t *card)
     lv_obj_set_style_radius(card, 8, 0);
 }
 
+static void ui_home_set_weather_icon(uint8_t weather_code)
+{
+    lv_obj_t *icon = home_context.tw_weather_icon;
+    const lv_img_dsc_t *source = ui_weather_img_get(weather_code);
+    uint32_t longest_side = LV_MAX(source->header.w, source->header.h);
+    uint16_t zoom = LV_IMG_ZOOM_NONE;
+
+    if (longest_side > HOME_WEATHER_ICON_SIZE)
+    {
+        zoom = (uint16_t)(HOME_WEATHER_ICON_SIZE * LV_IMG_ZOOM_NONE / longest_side);
+    }
+    if (lv_img_get_src(icon) == source && lv_img_get_zoom(icon) == zoom)
+    {
+        return;
+    }
+
+    lv_img_set_src(icon, source);
+    lv_img_set_zoom(icon, zoom);
+    lv_obj_refresh_self_size(icon);
+}
+
 // 创建主页-时间和天气面板
 static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
 {
@@ -309,12 +331,14 @@ static void ui_home_create_datetime_weather_panel(lv_obj_t *parent)
     /* 固定图标槽尺寸，避免不同天气图片尺寸造成文字位置跳动。 */
     weather_icon_slot = lv_obj_create(home_context.weather_group);
     lv_obj_clear_flag(weather_icon_slot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(weather_icon_slot, 72, 72);
+    lv_obj_set_size(weather_icon_slot, HOME_WEATHER_ICON_SIZE, HOME_WEATHER_ICON_SIZE);
     lv_obj_set_style_bg_opa(weather_icon_slot, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(weather_icon_slot, 0, 0);
     lv_obj_set_style_pad_all(weather_icon_slot, 0, 0);
     home_context.tw_weather_icon = lv_img_create(weather_icon_slot);
-    lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(99U)); // 默认显示未知图标N/A
+    lv_img_set_size_mode(home_context.tw_weather_icon, LV_IMG_SIZE_MODE_REAL);
+    lv_obj_set_size(home_context.tw_weather_icon, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    ui_home_set_weather_icon(99U); // 默认显示未知图标N/A
     lv_obj_center(home_context.tw_weather_icon);
 
     weather_info = lv_obj_create(home_context.weather_group);
@@ -879,7 +903,7 @@ static void ui_home_refresh_timer_cb(lv_timer_t* t)
             lv_label_set_text_fmt(home_context.tw_temperature_label, "%d",
                                   weather->current.temperature);
             lv_label_set_text(home_context.tw_weather_text_label, weather->current.text);
-            lv_img_set_src(home_context.tw_weather_icon, ui_weather_img_get(weather->current.code));
+            ui_home_set_weather_icon(weather->current.code);
         }
         lv_obj_set_style_text_color(home_context.status_bar_wifi_icon,
             weather->connected ? lv_palette_main(LV_PALETTE_BLUE) : lv_color_hex(0xA5AFBC), 0);

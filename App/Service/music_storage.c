@@ -67,7 +67,16 @@ static bool mp3_frame(const uint8_t *p, mp3_frame_t *frame)
     return true;
 }
 
-/* 只读取文件头和少量尾部数据，避免为获取时长阻塞文件任务全盘扫描。 */
+/**
+ * read_duration() - 探测当前音乐文件的播放时长
+ * @duration: 非空输出，保存秒数和是否为码率估算的标志
+ *
+ * 只读取 WAV 区块、MP3 头部窗口和必要的尾部标签。
+ * 函数会改变文件位置，播放前由打开流程将文件定位回起点。
+ *
+ * Context: 仅文件任务调用，要求音频文件已打开，可能阻塞于文件读取。
+ * Return: 探测结束返回 %FR_OK，无法识别时秒数为 0。读取或定位失败时返回 FatFS 错误。
+ */
 static FRESULT read_duration(music_duration_t *duration)
 {
     uint8_t header[24];
@@ -178,6 +187,12 @@ static bool supported(const char *name)
             tolower((unsigned char)ext[2]) == 'a' && tolower((unsigned char)ext[3]) == 'v');
 }
 
+/**
+ * music_storage_create() - 创建文件请求及结果队列
+ *
+ * Context: 系统初始化阶段调用一次，先于音乐任务使用存储接口。
+ * Return: 两个队列均创建成功返回 %true，否则返回 %false。
+ */
 bool music_storage_create(void)
 {
     requests = xQueueCreate(1, sizeof(storage_request_t));
@@ -185,6 +200,20 @@ bool music_storage_create(void)
     return requests != NULL && results != NULL;
 }
 
+/**
+ * music_storage_request() - 提交文件操作并等待文件任务返回
+ * @op: 扫描、打开、读取或关闭操作
+ * @path: 打开时为文件路径，其他操作可传 %NULL，扫描使用 %MUSIC_DIRECTORY
+ * @buffer: 扫描输出曲目数组，读取输出原始字节，打开时可接收 music_duration_t，关闭时传 %NULL
+ * @capacity: 扫描时为数组元素数，读取时为字节数（最多 32768），打开时为时长结构的字节数，关闭时为 0
+ * @amount: 可选输出，扫描时为曲目数，读取时为实际字节数
+ *
+ * 请求读取非零字节时，成功返回 0 字节表示已到文件尾。
+ *
+ * Context: 仅音乐任务调用，可能阻塞。提交前须收回异步读结果，
+ * 且 @buffer 必须保持有效直到函数返回。
+ * Return: 文件操作结果，或队列未就绪、路径无效、队列操作失败对应的状态。
+ */
 file_service_status_t music_storage_request(music_storage_op_t op, const char *path,
                                            void *buffer, size_t capacity, size_t *amount)
 {
@@ -203,11 +232,63 @@ file_service_status_t music_storage_request(music_storage_op_t op, const char *p
     return result.status;
 }
 
+/**
+ * music_storage_active() - 查询音乐文件的打开标记
+ *
+ * Context: 仅文件任务调用，与音频文件句柄由同一任务管理。
+ * Return: 文件处于打开状态返回 %true，否则返回 %false。
+ */
 bool music_storage_active(void)
 {
     return opened; /* 仅文件任务调用，与FIL处于同一所有者。 */
 }
 
+/**
+ * music_storage_read_begin() - 提交下一块音频的异步读请求
+ * @buffer: 非空目标缓冲区
+ * @capacity: 目标缓冲区字节数，范围为 1 到 32768
+ *
+ * 入队后须保持 @buffer 有效且不得复用，直到调用 music_storage_read_end()
+ * 取回结果。发起下一项文件操作或关闭文件前，也必须取回该结果。
+ *
+ * Context: 仅音乐任务调用，要求文件已打开且没有未收回的请求。不等待队列或读取。
+ * Return: 成功入队返回 %true，参数或队列检查失败返回 %false。
+ */
+bool music_storage_read_begin(void *buffer, size_t capacity)
+{
+    if (requests == NULL || results == NULL || buffer == NULL || capacity == 0 || capacity > 32768U)
+        return false;
+    storage_request_t request = {0};
+    request.op = MUSIC_STORAGE_READ;
+    request.buffer = buffer;
+    request.capacity = capacity;
+    return xQueueSend(requests, &request, 0) == pdPASS;
+}
+
+/**
+ * music_storage_read_end() - 收回已提交的异步读请求结果
+ * @amount: 可选输出，接收实际读取字节数，成功时为 0 表示文件尾
+ *
+ * Context: 仅音乐任务在成功提交异步读后调用，每个请求调用一次。
+ * 可能阻塞至文件任务发布结果。
+ * Return: 异步读取结果，或接收失败时返回 %FILE_SERVICE_IO_ERROR。
+ */
+file_service_status_t music_storage_read_end(size_t *amount)
+{
+    storage_result_t result;
+    if (results == NULL || xQueueReceive(results, &result, portMAX_DELAY) != pdPASS)
+        return FILE_SERVICE_IO_ERROR;
+    if (amount != NULL) *amount = result.amount;
+    return result.status;
+}
+
+/**
+ * music_storage_poll() - 在文件任务中处理至多一项音乐存储请求
+ *
+ * 串行访问 FatFS 句柄和工作区。处理完成后通过结果队列交还状态和数据长度。
+ *
+ * Context: 仅文件任务及其让出点调用。不等待新请求，处理已有请求时可能阻塞。
+ */
 void music_storage_poll(void)
 {
     storage_result_t result = {FILE_SERVICE_OK, 0};

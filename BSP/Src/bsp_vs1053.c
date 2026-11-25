@@ -5,6 +5,12 @@
 #include "task.h"
 #include <string.h>
 
+/**
+ * bsp_vs1053_ready() - 采样解码器的 DREQ 就绪引脚
+ *
+ * Context: GPIO 配置完成后调用，不等待引脚变化。
+ * Return: DREQ 为高返回 %true，为低返回 %false。
+ */
 bool bsp_vs1053_ready(void)
 {
     return HAL_GPIO_ReadPin(MUSIC_DREQ_PORT, MUSIC_DREQ_PIN) == GPIO_PIN_SET;
@@ -21,6 +27,16 @@ static bool wait_ready(void)
     return true;
 }
 
+/**
+ * sci() - 通过 XCS 执行一次 SCI 寄存器读写
+ * @reg: SCI 寄存器号
+ * @value: 非空指针，写操作提供寄存器值，读操作用于接收寄存器值
+ * @write: %true 写寄存器，%false 读寄存器
+ *
+ * Context: 音乐任务独占 SPI，传输前及成功传输后均可能等待 DREQ。
+ * 每次就绪等待的超时为 250 ms。
+ * Return: SPI 传输及两次就绪检查均成功返回 %true，否则返回 %false。
+ */
 static bool sci(uint8_t reg, uint16_t *value, bool write)
 {
     uint8_t tx[4] = {write ? 2U : 3U, reg, (uint8_t)(*value >> 8), (uint8_t)*value};
@@ -39,6 +55,13 @@ static bool write_memory(uint16_t address, uint16_t value)
     return write_reg(7, address) && write_reg(6, value);
 }
 
+/**
+ * bsp_vs1053_volume() - 设置左右声道的输出音量
+ * @percent: 0 到 100 的音量百分比，0 对应 SCI_VOL 的 0xFEFE 静音值
+ *
+ * Context: 初始化过程中或初始化完成后，由音乐任务调用，可能等待 DREQ。
+ * Return: 音量写入成功返回 %true，参数越界或 SCI 访问失败返回 %false。
+ */
 bool bsp_vs1053_volume(uint8_t percent)
 {
     if (percent > 100U) return false;
@@ -46,11 +69,26 @@ bool bsp_vs1053_volume(uint8_t percent)
     return write_reg(11, (attenuation << 8) | attenuation);
 }
 
+/**
+ * bsp_vs1053_i2s_enable() - 配置解码器的 I²S 引脚和数字音频输出
+ *
+ * Context: 解码器初始化后由独占 SPI 的任务调用，可能等待 DREQ。
+ * Return: 两项配置均写入成功返回 %true，否则返回 %false，已写入的配置可能保留。
+ */
 bool bsp_vs1053_i2s_enable(void)
 {
     return write_memory(0xC017U, 0x00F0U) && write_memory(0xC040U, 0x000CU);
 }
 
+/**
+ * bsp_vs1053_init() - 复位 VS1053 并配置耳机播放所需的时钟和音量
+ *
+ * 先用低速 SPI 确认芯片型号和软复位后的模式，再请求切换到工作速率。
+ *
+ * Context: 仅音乐任务调用，初始化过程中会延时并等待 DREQ。
+ * Return: 硬件未确认、低速 SPI 初始化失败或芯片配置检查失败时返回 %false，
+ * 完成配置并请求切换工作速率后返回 %true。
+ */
 bool bsp_vs1053_init(void)
 {
     if (!MUSIC_HARDWARE_CONFIRMED) return false;
@@ -76,13 +114,26 @@ bool bsp_vs1053_init(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     uint16_t status = 0;
     if (!sci(1, &status, false) || ((status >> 4) & 15U) != 4U) return false;
-    /* 12.288MHz晶振、3倍CLKI；先设置安全音量，再开放数字音频输出。 */
+    /* 硬复位可能进入GPIO选择的启动模式，软复位后进入正常音频解码。 */
+    if (!write_reg(0, 0x0804U)) return false;
+    vTaskDelay(pdMS_TO_TICKS(2)); /* 软复位最长需要22000个XTALI周期。 */
+    uint16_t mode = 0;
+    if (!sci(0, &mode, false) || mode != 0x0800U) return false;
+    /* 12.288MHz晶振、3倍CLKI；使用芯片自身的DAC输出到耳机。 */
     if (!write_reg(0, 0x0800U) || !write_reg(3, 0x6000U) ||
         !bsp_vs1053_volume(50)) return false;
     platform_music_spi_fast();
-    return bsp_vs1053_i2s_enable();
+    return true;
 }
 
+/**
+ * bsp_vs1053_send() - 通过 XDCS 向解码器发送一块音频数据
+ * @data: 非空源缓冲区，至少包含 @size 字节
+ * @size: 本次传输字节数，范围为 1 到 32
+ *
+ * Context: 初始化完成后由音乐任务独占 SPI 发送。不等待 DREQ 拉高，SPI 传输会阻塞。
+ * Return: 传输成功返回 %true，长度无效、DREQ 为低或 SPI 传输失败返回 %false。
+ */
 bool bsp_vs1053_send(const uint8_t *data, uint16_t size)
 {
     uint8_t tx[32] = {0};
@@ -95,12 +146,31 @@ bool bsp_vs1053_send(const uint8_t *data, uint16_t size)
     return ok;
 }
 
+/**
+ * bsp_vs1053_seconds() - 读取解码器的整秒计时
+ * @seconds: 非空输出。仅在返回成功时使用其值
+ *
+ * Context: 解码器初始化后由音乐任务调用，可能等待 DREQ。
+ * Return: SCI_DECODE_TIME 读取成功返回 %true，否则返回 %false。
+ */
 bool bsp_vs1053_seconds(uint16_t *seconds)
 {
     *seconds = 0;
     return sci(4, seconds, false);
 }
 
+/**
+ * bsp_vs1053_finish() - 结束当前音频流并清零解码计时
+ * @cancel: %true 表示主动取消，%false 表示已经送完文件数据
+ *
+ * 使用芯片的 endFillByte 填充，正常结束时先填充再设置 SM_CANCEL。
+ * 主动取消时在 SM_CANCEL 清除后补发剩余的结束填充。
+ *
+ * Context: 仅音乐任务调用。过程中多次等待 DREQ 并同步传输，
+ * 各次等待分别计时，整个函数没有共用的超时。
+ * Return: 芯片清除 SM_CANCEL 且计时清零成功返回 %true。
+ * 传输失败、DREQ 超时或 64 轮内取消未完成返回 %false。
+ */
 bool bsp_vs1053_finish(bool cancel)
 {
     uint16_t fill = 0;

@@ -17,6 +17,7 @@ typedef struct
     lv_obj_t *time;
     lv_obj_t *duration;
     lv_obj_t *list;
+    lv_obj_t *list_empty;
     lv_obj_t *play_text;
     lv_obj_t *mode_icon;
     lv_obj_t *mode_overlay;
@@ -31,6 +32,9 @@ typedef struct
     lv_timer_t *timer;
     uint32_t list_version;
     uint16_t rotation;
+    uint16_t list_track;
+    music_state_t list_state;
+    bool list_has_current;
     uint8_t mode;
     uint8_t volume_value;
     bool request_failed;
@@ -370,6 +374,71 @@ static void spectrum_draw(lv_event_t *event)
         }
 }
 
+static void track_play_cb(lv_event_t *event)
+{
+    uint32_t track = (uint32_t)(uintptr_t)lv_event_get_user_data(event);
+    ui.request_failed = !music_service_command(MUSIC_PLAY, track);
+}
+
+static void track_row_create(unsigned track, char *name)
+{
+    char *extension = strrchr(name, '.');
+    const char *format = "";
+    if (extension != NULL)
+    {
+        format = extension + 1;
+        *extension = '\0';
+    }
+    lv_obj_t *row = lv_btn_create(ui.list);
+    lv_obj_set_user_data(row, (void *)(uintptr_t)track);
+    lv_obj_set_size(row, lv_pct(100), 64);
+    lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(0xE6F0FF), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(row, lv_color_hex(0xF0F4F8), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(row, 0, 0);
+    lv_obj_set_style_radius(row, 8, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(0xEDF1F6), 0);
+    lv_obj_set_style_pad_hor(row, 10, 0);
+    lv_obj_set_style_pad_ver(row, 1, 0);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_set_style_text_color(row, lv_color_hex(0x243247), 0);
+    lv_obj_set_style_text_color(row, lv_color_hex(0x2196F3), LV_STATE_CHECKED);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_event_cb(row, track_play_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)track);
+
+    lv_obj_t *tile = lv_obj_create(row);
+    lv_obj_remove_style_all(tile);
+    lv_obj_clear_flag(tile, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(tile, 32, 32);
+    lv_obj_set_style_radius(tile, 7, 0);
+    lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(tile, lv_color_hex(0xE6F0FF), 0);
+    lv_obj_set_style_text_color(tile, lv_color_hex(0x2196F3), 0);
+    lv_obj_t *symbol = lv_label_create(tile);
+    lv_label_set_text(symbol, LV_SYMBOL_AUDIO);
+    lv_obj_center(symbol);
+
+    lv_obj_t *info = lv_obj_create(row);
+    lv_obj_remove_style_all(info);
+    lv_obj_clear_flag(info, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(info, 0, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(info, 1);
+    lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t *title = lv_label_create(info);
+    lv_obj_set_width(title, lv_pct(100));
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    /* 保留斜体字形左侧笔画。 */
+    lv_label_set_text_fmt(title, " %s", name);
+    lv_obj_t *detail = lv_label_create(info);
+    lv_obj_set_width(detail, lv_pct(100));
+    lv_obj_set_style_text_font(detail, &ui_font_chinese_20, 0);
+    lv_obj_set_style_text_color(detail, lv_color_hex(0x69788B), 0);
+    lv_label_set_text(detail, format);
+}
+
 static void refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -413,39 +482,75 @@ static void refresh_cb(lv_timer_t *timer)
     {
         volume_update_widgets(snapshot.volume);
     }
-    lv_label_set_text_fmt(ui.track_count, "%u 首", snapshot.count);
+    if (snapshot.state == MUSIC_SCANNING) lv_label_set_text(ui.track_count, "扫描中…");
+    else lv_label_set_text_fmt(ui.track_count, "共 %u 首", snapshot.count);
     const char *source = snapshot.state == MUSIC_PLAYING ? "正在播放" :
                          snapshot.state == MUSIC_PAUSED ? "已暂停" : "本地音乐";
     if (strcmp(lv_label_get_text(ui.source), source) != 0) lv_label_set_text(ui.source, source);
-    if (snapshot.state != MUSIC_SCANNING && snapshot.playlist_version != ui.list_version)
+    bool rebuilt = snapshot.state != MUSIC_SCANNING && snapshot.playlist_version != ui.list_version;
+    bool has_current = snapshot.title[0] != '\0';
+    bool track_changed = has_current && (!ui.list_has_current || ui.list_track != snapshot.track);
+    bool follow_track = track_changed && !lv_obj_is_scrolling(ui.list);
+    if (rebuilt)
     {
+        lv_coord_t scroll_y = lv_obj_get_scroll_y(ui.list);
         lv_obj_clean(ui.list);
         for (unsigned i = 0; i < snapshot.count; i++)
         {
             char name[MUSIC_NAME_CAP];
             if (!music_service_track_name(i, name, sizeof(name))) continue;
-            lv_obj_t *entry = lv_list_add_btn(ui.list, LV_SYMBOL_AUDIO, name);
-            /* J等斜体字形有负左边距；显示前留一个空格，避免滚动标签裁掉左侧笔画。 */
-            lv_obj_t *name_label = lv_obj_get_child(entry, 1);
-            lv_label_set_text_fmt(name_label, " %s", name);
-            lv_obj_set_height(entry, 56);
-            lv_obj_set_style_pad_hor(entry, 10, 0);
-            lv_obj_set_style_pad_column(entry, 10, 0);
-            lv_obj_set_style_radius(entry, 8, 0);
-            lv_obj_set_style_text_color(entry, lv_color_hex(0x243247), 0);
-            lv_obj_set_style_bg_color(entry, lv_color_hex(0xE6F0FF), LV_STATE_CHECKED);
-            lv_obj_set_style_text_color(entry, lv_color_hex(0x2196F3), LV_STATE_CHECKED);
-            lv_obj_set_style_bg_color(entry, lv_color_hex(0xF0F4F8), LV_STATE_PRESSED);
-            lv_obj_add_event_cb(entry, command_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)MUSIC_PLAY);
+            track_row_create(i, name);
         }
         ui.list_version = snapshot.playlist_version;
+        lv_obj_scroll_to_y(ui.list, scroll_y, LV_ANIM_OFF);
     }
-    for (unsigned i = 0; i < lv_obj_get_child_cnt(ui.list); i++)
+    if (rebuilt || track_changed || ui.list_has_current != has_current || ui.list_state != snapshot.state)
     {
-        lv_obj_t *entry = lv_obj_get_child(ui.list, i);
-        if (snapshot.title[0] && i == snapshot.track) lv_obj_add_state(entry, LV_STATE_CHECKED);
-        else lv_obj_clear_state(entry, LV_STATE_CHECKED);
+        for (unsigned i = 0; i < lv_obj_get_child_cnt(ui.list); i++)
+        {
+            lv_obj_t *entry = lv_obj_get_child(ui.list, i);
+            unsigned track = (unsigned)(uintptr_t)lv_obj_get_user_data(entry);
+            char name[MUSIC_NAME_CAP];
+            if (!music_service_track_name(track, name, sizeof(name))) continue;
+            bool current = has_current && track == snapshot.track;
+            lv_obj_t *symbol = lv_obj_get_child(lv_obj_get_child(entry, 0), 0);
+            lv_obj_t *info = lv_obj_get_child(entry, 1);
+            lv_obj_t *title = lv_obj_get_child(info, 0);
+            lv_obj_t *detail = lv_obj_get_child(info, 1);
+            if (current) lv_obj_add_state(entry, LV_STATE_CHECKED);
+            else lv_obj_clear_state(entry, LV_STATE_CHECKED);
+            const char *state_symbol = LV_SYMBOL_AUDIO;
+            const char *extension = strrchr(name, '.');
+            const char *detail_text = extension != NULL ? extension + 1 : "";
+            const lv_font_t *font = &ui_font_chinese_20;
+            if (current && snapshot.state == MUSIC_PLAYING)
+            {
+                state_symbol = LV_SYMBOL_PLAY;
+                detail_text = "正在播放";
+                font = &ui_font_chinese_24_4;
+            }
+            else if (current && snapshot.state == MUSIC_PAUSED)
+            {
+                state_symbol = LV_SYMBOL_PAUSE;
+                detail_text = "已暂停";
+                font = &ui_font_chinese_24_4;
+            }
+            lv_label_set_text(symbol, state_symbol);
+            lv_label_set_long_mode(title, current ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT);
+            lv_obj_set_style_text_font(detail, font, 0);
+            lv_label_set_text(detail, detail_text);
+            if (current && follow_track) lv_obj_scroll_to_view(entry, LV_ANIM_OFF);
+        }
     }
+    ui.list_track = snapshot.track;
+    ui.list_state = snapshot.state;
+    ui.list_has_current = has_current;
+    if (lv_obj_get_child_cnt(ui.list) == 0)
+    {
+        lv_label_set_text(ui.list_empty, snapshot.state == MUSIC_SCANNING ? "正在扫描音乐…" : "暂无音乐");
+        lv_obj_clear_flag(ui.list_empty, LV_OBJ_FLAG_HIDDEN);
+    }
+    else lv_obj_add_flag(ui.list_empty, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* 以原生圆形对象绘制默认唱片，避免放大48px启动图标作为整张封面。 */
@@ -625,22 +730,49 @@ void ui_music_create(lv_obj_t *parent)
     lv_obj_remove_style_all(toolbar);
     lv_obj_set_size(toolbar, lv_pct(100), 38);
     lv_obj_set_flex_flow(toolbar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(toolbar, 8, 0);
+    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *list_title = lv_label_create(toolbar);
     lv_label_set_text(list_title, "播放列表");
     lv_obj_set_style_text_color(list_title, lv_color_hex(0x243247), 0);
     ui.track_count = lv_label_create(toolbar);
+    lv_obj_set_width(ui.track_count, 0);
+    lv_obj_set_flex_grow(ui.track_count, 1);
+    lv_label_set_long_mode(ui.track_count, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_letter_space(ui.track_count, -1, 0);
     lv_obj_set_style_text_color(ui.track_count, lv_color_hex(0x69788B), 0);
-    lv_obj_t *scan = button(toolbar, "刷新", MUSIC_SCAN);
-    lv_obj_set_size(lv_obj_get_parent(scan), 76, 36);
-    lv_obj_set_style_bg_color(lv_obj_get_parent(scan), lv_color_hex(0x4CAF50), LV_STATE_PRESSED);
+    lv_obj_t *scan = button(toolbar, LV_SYMBOL_REFRESH, MUSIC_SCAN);
+    lv_obj_t *scan_button = lv_obj_get_parent(scan);
+    lv_obj_set_size(scan_button, 34, 34);
+    lv_obj_set_style_radius(scan_button, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(scan_button, lv_color_hex(0xF3F7FD), 0);
+    lv_obj_set_style_text_color(scan_button, lv_color_hex(0x3C5875), 0);
+    lv_obj_set_style_border_width(scan_button, 1, 0);
+    lv_obj_set_style_border_color(scan_button, lv_color_hex(0xE0E8F2), 0);
+    lv_obj_set_style_border_color(scan_button, lv_color_hex(0x2196F3), LV_STATE_PRESSED);
+    lv_obj_set_style_translate_y(scan_button, 1, LV_STATE_PRESSED);
     ui.list = lv_list_create(right);
     lv_obj_set_width(ui.list, lv_pct(100)); lv_obj_set_flex_grow(ui.list, 1);
-    lv_obj_set_style_pad_all(ui.list, 2, 0);
-    lv_obj_set_style_pad_row(ui.list, 4, 0);
+    lv_obj_set_style_pad_all(ui.list, 0, 0);
+    /* 为滚动条留出独立空隙，避免覆盖歌曲行背景。 */
+    lv_obj_set_style_pad_right(ui.list, 10, 0);
+    lv_obj_set_style_pad_row(ui.list, 0, 0);
     lv_obj_set_style_border_width(ui.list, 0, 0);
     lv_obj_set_style_bg_opa(ui.list, LV_OPA_TRANSP, 0);
+    lv_obj_set_scroll_dir(ui.list, LV_DIR_VER);
+    lv_obj_set_style_width(ui.list, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_right(ui.list, 1, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_top(ui.list, 4, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_bottom(ui.list, 4, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(ui.list, LV_RADIUS_CIRCLE, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(ui.list, lv_color_hex(0xA5AFBC), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(ui.list, LV_OPA_60, LV_PART_SCROLLBAR);
+    lv_obj_set_style_border_width(ui.list, 0, LV_PART_SCROLLBAR);
     lv_obj_set_scrollbar_mode(ui.list, LV_SCROLLBAR_MODE_AUTO);
+    ui.list_empty = lv_label_create(right);
+    lv_obj_add_flag(ui.list_empty, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_color(ui.list_empty, lv_color_hex(0x69788B), 0);
+    lv_obj_center(ui.list_empty);
     ui.list_version = UINT32_MAX;
     ui.timer = lv_timer_create(refresh_cb, 33, NULL);
     music_snapshot_t snapshot;
