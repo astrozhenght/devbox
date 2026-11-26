@@ -16,11 +16,17 @@ static MUSIC_RAM StackType_t stack[1024];
 static StaticTask_t task_control;
 static audio_spectrum_snapshot_t published;
 static volatile bool enabled;
+static volatile uint32_t generation;
 
 void audio_spectrum_enable(bool value)
 {
     taskENTER_CRITICAL();
-    enabled = value;
+    if (enabled != value)
+    {
+        enabled = value;
+        generation++;
+        if (value) memset(published.levels, 0, sizeof(published.levels));
+    }
     taskEXIT_CRITICAL();
 }
 
@@ -31,12 +37,42 @@ void audio_spectrum_snapshot(audio_spectrum_snapshot_t *snapshot)
     taskEXIT_CRITICAL();
 }
 
+/* 两个声道分别加窗变换，各频带取两者中较强的分量，保留反相和单侧信号。 */
+static void accumulate_channel_peaks(unsigned channel, const unsigned *edges, float *peaks)
+{
+    float mean = 0;
+    for (unsigned i = 0; i < MUSIC_FFT_SIZE; i++) mean += stereo[2U * i + channel];
+    mean /= MUSIC_FFT_SIZE;
+    for (unsigned i = 0; i < MUSIC_FFT_SIZE; i++)
+        input[i] = (stereo[2U * i + channel] - mean) * (1.0f / 32768.0f) * window[i];
+    arm_rfft_fast_f32(&fft, input, output, 0);
+
+    for (unsigned band = 0; band < MUSIC_SPECTRUM_BANDS; band++)
+    {
+        unsigned begin = edges[band];
+        unsigned end = edges[band + 1U];
+        if (end <= begin) end = begin + 1U;
+        for (unsigned bin = begin; bin < end && bin < MUSIC_FFT_SIZE / 2U; bin++)
+        {
+            float re = output[2U * bin];
+            float im = output[2U * bin + 1U];
+            float power = re * re + im * im;
+            if (power > peaks[band]) peaks[band] = power;
+        }
+    }
+}
+
 static void spectrum_entry(void *argument)
 {
     (void)argument;
     uint32_t sequence = 0;
+    uint32_t active_generation = 0;
+    bool first_block = true;
     TickType_t last_pcm = 0;
     audio_spectrum_snapshot_t result = {0};
+    unsigned edges[MUSIC_SPECTRUM_BANDS + 1U];
+    for (unsigned i = 0; i <= MUSIC_SPECTRUM_BANDS; i++)
+        edges[i] = (unsigned)powf(426.0f, (float)i / MUSIC_SPECTRUM_BANDS);
     for (unsigned i = 0; i < MUSIC_FFT_SIZE; i++)
         window[i] = 0.5f - 0.5f * cosf(6.28318530718f * i / (MUSIC_FFT_SIZE - 1U));
     if (arm_rfft_fast_init_f32(&fft, MUSIC_FFT_SIZE) != ARM_MATH_SUCCESS)
@@ -47,46 +83,45 @@ static void spectrum_entry(void *argument)
     }
     for (;;)
     {
+        taskENTER_CRITICAL();
+        bool capture = enabled;
+        uint32_t current_generation = generation;
+        taskEXIT_CRITICAL();
+        if (active_generation != current_generation)
+        {
+            active_generation = current_generation;
+            first_block = true;
+            if (capture) memset(smooth, 0, sizeof(smooth));
+        }
         uint32_t previous = sequence;
-        bool fresh = enabled && platform_music_pcm_copy(stereo, &sequence);
+        bool fresh = capture && platform_music_pcm_copy(stereo, &sequence);
         if (fresh)
         {
-            if (sequence > previous + 1U) result.dropped += sequence - previous - 1U;
+            if (!first_block) result.dropped += sequence - previous - 1U;
+            first_block = false;
             last_pcm = xTaskGetTickCount();
-            float mean = 0;
-            for (unsigned i = 0; i < MUSIC_FFT_SIZE; i++) mean += stereo[i * 2U] / 32768.0f;
-            mean /= MUSIC_FFT_SIZE;
-            for (unsigned i = 0; i < MUSIC_FFT_SIZE; i++)
-                input[i] = (stereo[i * 2U] / 32768.0f - mean) * window[i];
-            arm_rfft_fast_f32(&fft, input, output, 0);
+            float peaks[MUSIC_SPECTRUM_BANDS] = {0};
+            accumulate_channel_peaks(0, edges, peaks);
+            accumulate_channel_peaks(1, edges, peaks);
             for (unsigned band = 0; band < MUSIC_SPECTRUM_BANDS; band++)
             {
-                /* 对数频带覆盖约47Hz～20kHz；至少包含一个有效FFT bin。 */
-                unsigned begin = (unsigned)powf(426.0f, (float)band / MUSIC_SPECTRUM_BANDS);
-                unsigned end = (unsigned)powf(426.0f, (float)(band + 1U) / MUSIC_SPECTRUM_BANDS);
-                if (end <= begin) end = begin + 1U;
-                float peak = 0;
-                for (unsigned bin = begin; bin < end && bin < MUSIC_FFT_SIZE / 2U; bin++)
-                {
-                    /* 排除特殊打包的DC/Nyquist，普通bin从output[2]开始。 */
-                    float re = output[2U * bin];
-                    float im = output[2U * bin + 1U];
-                    float power = re * re + im * im;
-                    if (power > peak) peak = power;
-                }
-                float db = 10.0f * log10f(peak * 16.0f / (MUSIC_FFT_SIZE * MUSIC_FFT_SIZE) + 1e-12f);
+                float db = 10.0f * log10f(peaks[band] * 16.0f / (MUSIC_FFT_SIZE * MUSIC_FFT_SIZE) + 1e-12f);
                 float level = (db + 60.0f) * (100.0f / 60.0f);
                 if (level < 0) level = 0;
                 if (level > 100) level = 100;
-                smooth[band] += (level - smooth[band]) * (level > smooth[band] ? 0.7f : 0.15f);
+                /* 快速跟随重音并及时回落，避免连续音乐被过度平滑。 */
+                smooth[band] += (level - smooth[band]) * (level > smooth[band] ? 0.90f : 0.40f);
             }
             result.frames++;
         }
-        if (!enabled || xTaskGetTickCount() - last_pcm > pdMS_TO_TICKS(150))
+        if (!capture || xTaskGetTickCount() - last_pcm > pdMS_TO_TICKS(150))
             for (unsigned band = 0; band < MUSIC_SPECTRUM_BANDS; band++) smooth[band] *= 0.8f;
         for (unsigned band = 0; band < MUSIC_SPECTRUM_BANDS; band++) result.levels[band] = (uint8_t)smooth[band];
         result.errors = platform_music_pcm_errors();
-        taskENTER_CRITICAL(); published = result; taskEXIT_CRITICAL();
+        taskENTER_CRITICAL();
+        /* 切歌或跳转可能抢占 FFT，旧采样的结果不能覆盖新会话。 */
+        if (generation == current_generation) published = result;
+        taskEXIT_CRITICAL();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

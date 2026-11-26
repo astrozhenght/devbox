@@ -24,6 +24,7 @@ static volatile bool programming_ack;
 static volatile bool programming_ok;
 static bool initialized;
 static bool file_open;
+static bool i2s_ready;
 /* 仅供调试器读取；记录连续播放的供数耗时，不增加SPI访问。单位为RTOS节拍。 */
 static volatile struct
 {
@@ -135,6 +136,7 @@ static bool stop(bool cancel)
         if (initialized && !bsp_vs1053_finish(cancel))
         {
             initialized = false;
+            i2s_ready = false;
             ok = false;
         }
         if (music_storage_request(MUSIC_STORAGE_CLOSE, NULL, NULL, 0, NULL) != FILE_SERVICE_OK)
@@ -145,6 +147,20 @@ static bool stop(bool cancel)
     strcpy(state.message, ok ? "已停止" : "停止或关闭文件失败");
     publish();
     return ok;
+}
+
+/* 频谱是可选支路，失败时保留 VS1053 的模拟耳机输出。 */
+static void start_spectrum(void)
+{
+    if (!MUSIC_SPECTRUM_CAPTURE)
+    {
+        strcpy(state.message, "正在播放");
+        return;
+    }
+    if (!i2s_ready) i2s_ready = bsp_vs1053_i2s_enable();
+    bool capture = i2s_ready && platform_music_sai_start();
+    audio_spectrum_enable(capture);
+    strcpy(state.message, capture ? "正在播放" : "频谱采集失败");
 }
 
 static void fail(const char *message)
@@ -271,9 +287,14 @@ static void music_entry(void *argument)
                     read_pending = false;
                     if (result != FILE_SERVICE_OK) { fail("音乐读取失败，请检查SD卡"); continue; }
                 }
+                audio_spectrum_enable(false);
+                platform_music_sai_stop();
                 /* 静音并结束旧流，失败时重新初始化解码器。 */
                 if (!bsp_vs1053_volume(0) || !bsp_vs1053_finish(true))
+                {
+                    i2s_ready = false;
                     initialized = bsp_vs1053_init();
+                }
                 if (!initialized) { fail("VS1053初始化失败"); continue; }
                 if (music_storage_request(MUSIC_STORAGE_SEEK, NULL, &cmd.value,
                                           sizeof(cmd.value), NULL) != FILE_SERVICE_OK)
@@ -289,6 +310,7 @@ static void music_entry(void *argument)
                 playback_timing.max_feed_gap = 0;
                 playback_timing.max_read_wait = 0;
                 playback_timing.max_clock_wait = 0;
+                if (state.state == MUSIC_PLAYING) start_spectrum();
             }
             else if (cmd.kind == MUSIC_TOGGLE && file_open)
             {
@@ -297,6 +319,13 @@ static void music_entry(void *argument)
                 if (!bsp_vs1053_volume(pause ? 0 : state.volume))
                 { fail("音量设置失败"); continue; }
                 state.state = pause ? MUSIC_PAUSED : MUSIC_PLAYING;
+                if (pause)
+                {
+                    audio_spectrum_enable(false);
+                    platform_music_sai_stop();
+                    strcpy(state.message, "已暂停");
+                }
+                else start_spectrum();
                 last_ready = xTaskGetTickCount();
                 last_send = last_ready;
             }
@@ -326,7 +355,7 @@ static void music_entry(void *argument)
                 amount = position = 0;
                 stream_index = 0;
                 if (!bsp_vs1053_volume(state.volume)) { fail("音量设置失败"); continue; }
-                strcpy(state.message, "正在播放");
+                start_spectrum();
                 last_ready = last_clock = xTaskGetTickCount();
                 last_send = last_ready;
                 playback_timing.bytes_sent = 0;

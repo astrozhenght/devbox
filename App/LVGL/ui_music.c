@@ -6,6 +6,10 @@
 #include <math.h>
 #include <string.h>
 
+#define SPECTRUM_BAR_COUNT 16U
+#define SPECTRUM_MAIN_BANDS 4U
+#define SPECTRUM_COLOR_COUNT 5U
+
 /* 视觉参考LVGL music demo：唱片、镜像环形频谱和曲目列表；数据均来自真实服务。 */
 typedef struct
 {
@@ -41,6 +45,11 @@ typedef struct
     uint8_t volume_value;
     bool request_failed;
     audio_spectrum_snapshot_t spectrum;
+    uint8_t spectrum_main[SPECTRUM_MAIN_BANDS];
+    uint8_t spectrum_previous[SPECTRUM_MAIN_BANDS];
+    uint32_t spectrum_lane;
+    uint32_t spectrum_lane_target;
+    bool spectrum_initialized;
 } music_ui_t;
 static music_ui_t ui;
 /* 退出播放器页面后仍保留可恢复的音量。 */
@@ -350,6 +359,103 @@ static void deleted_cb(lv_event_t *event)
     memset(&ui, 0, sizeof(ui));
 }
 
+/* 合并实时FFT频段，并放大相邻画面之间的上升沿，让鼓点和重音更清楚。 */
+/* 强瞬态进入柔压缩区，为频谱顶部保留动态余量。 */
+static uint8_t spectrum_limit_level(unsigned level)
+{
+    if (level > 100U) level = 100U;
+    if (level > 70U) level = 70U + (level - 70U) / 2U;
+    return (uint8_t)level;
+}
+
+static void spectrum_update_main_levels(bool playing)
+{
+    const unsigned source_per_band = MUSIC_SPECTRUM_BANDS / SPECTRUM_MAIN_BANDS;
+    bool bass_hit = false;
+    uint8_t bass = 0;
+    for (unsigned band = 0; band < SPECTRUM_MAIN_BANDS; band++)
+    {
+        unsigned sum = 0;
+        uint8_t peak = 0;
+        for (unsigned i = 0; i < source_per_band; i++)
+        {
+            uint8_t level = ui.spectrum.levels[band * source_per_band + i];
+            sum += level;
+            if (level > peak) peak = level;
+        }
+        uint8_t raw = (uint8_t)((sum / source_per_band + peak * 3U) / 4U);
+        if (!ui.spectrum_initialized)
+            ui.spectrum_main[band] = spectrum_limit_level(raw);
+        else
+        {
+            unsigned target = raw;
+            if (raw > ui.spectrum_previous[band])
+                target += (raw - ui.spectrum_previous[band]) * 2U;
+            target = spectrum_limit_level(target);
+            uint8_t current = ui.spectrum_main[band];
+            ui.spectrum_main[band] = target >= current ? (uint8_t)target :
+                                      (uint8_t)((current + target) / 2U);
+        }
+        if (band == 0)
+        {
+            bass = raw;
+            bass_hit = ui.spectrum_initialized && raw > 45U && raw > ui.spectrum_previous[band] + 4U;
+        }
+        ui.spectrum_previous[band] = raw;
+    }
+    if (playing)
+    {
+        if (bass_hit)
+            ui.spectrum_lane_target += (2U + ui.spectrum.frames % 3U) * 256U;
+        else if (bass < 35U)
+            ui.spectrum_lane_target += 8U;
+        uint32_t distance = ui.spectrum_lane_target - ui.spectrum_lane;
+        ui.spectrum_lane += distance > 16U ? (distance + 7U) / 8U : distance;
+    }
+    ui.spectrum_initialized = true;
+}
+
+/* 按 LVGL Music Demo 的方式，把四个主频段用余弦曲线扩散到相邻柱条。 */
+static void spectrum_visual_levels(uint8_t bars[SPECTRUM_BAR_COUNT])
+{
+    static const uint8_t widths[SPECTRUM_MAIN_BANDS] = {16, 6, 3, 2};
+    uint8_t base[SPECTRUM_BAR_COUNT] = {0};
+    for (unsigned band = 0; band < SPECTRUM_MAIN_BANDS; band++)
+    {
+        unsigned width = widths[band];
+        int center = (int)(band * (SPECTRUM_BAR_COUNT / SPECTRUM_MAIN_BANDS));
+        for (unsigned i = 0; i < width; i++)
+        {
+            int index = center - (int)(width / 2U) + (int)i;
+            if (index < 0) index += SPECTRUM_BAR_COUNT;
+            if (index >= SPECTRUM_BAR_COUNT) index -= SPECTRUM_BAR_COUNT;
+            float weight = 0.5f - 0.5f * cosf(6.28318530718f * i / width);
+            unsigned contribution = (unsigned)(ui.spectrum_main[band] * weight + 0.5f);
+            /* 柔性叠加可避免相邻频段重叠时直接截断到100。 */
+            unsigned level = base[index] + contribution - base[index] * contribution / 100U;
+            base[index] = level > 100U ? 100U : (uint8_t)level;
+        }
+    }
+    unsigned offset = (ui.spectrum_lane >> 8) % SPECTRUM_BAR_COUNT;
+    unsigned mix = ui.spectrum_lane & 255U;
+    for (unsigned i = 0; i < SPECTRUM_BAR_COUNT; i++)
+    {
+        unsigned first = (i + offset) % SPECTRUM_BAR_COUNT;
+        unsigned second = (first + 1U) % SPECTRUM_BAR_COUNT;
+        bars[i] = (uint8_t)((base[first] * (256U - mix) + base[second] * mix + 128U) >> 8);
+    }
+}
+
+static lv_color_t spectrum_bar_color(unsigned index)
+{
+    static const uint32_t palette[SPECTRUM_COLOR_COUNT] =
+    {
+        0x26C6DA, 0x29B6F6, 0x2196F3, 0x536DFE, 0x7E57C2
+    };
+    unsigned color = index * SPECTRUM_COLOR_COUNT / SPECTRUM_BAR_COUNT;
+    return lv_color_hex(palette[color]);
+}
+
 static void spectrum_draw(lv_event_t *event)
 {
     lv_obj_t *obj = lv_event_get_target(event);
@@ -358,22 +464,36 @@ static void spectrum_draw(lv_event_t *event)
     lv_obj_get_coords(obj, &area);
     int cx = (area.x1 + area.x2) / 2;
     int cy = (area.y1 + area.y2) / 2;
-    lv_draw_line_dsc_t line;
-    lv_draw_line_dsc_init(&line);
-    line.width = 3;
-    line.round_start = 1;
-    line.round_end = 1;
-    for (unsigned side = 0; side < 2; side++)
-        for (unsigned band = 0; band < MUSIC_SPECTRUM_BANDS; band++)
-        {
-            float angle = ((float)band / MUSIC_SPECTRUM_BANDS * 3.14159265f) * (side ? -1.0f : 1.0f);
-            float length = 2.0f + ui.spectrum.levels[band] * 0.20f;
-            lv_point_t from = {cx + (lv_coord_t)(sinf(angle) * 72), cy - (lv_coord_t)(cosf(angle) * 72)};
-            lv_point_t to = {cx + (lv_coord_t)(sinf(angle) * (72 + length)),
-                            cy - (lv_coord_t)(cosf(angle) * (72 + length))};
-            line.color = band < 16 ? lv_color_hex(0x2196F3) : lv_color_hex(0x7E57C2);
-            lv_draw_line(draw, &line, &from, &to);
-        }
+    uint8_t bars[SPECTRUM_BAR_COUNT];
+    spectrum_visual_levels(bars);
+    lv_draw_rect_dsc_t bar;
+    lv_draw_rect_dsc_init(&bar);
+    lv_point_t points[4];
+    const float step = 3.14159265f / SPECTRUM_BAR_COUNT;
+    const float gap = 0.025f;
+    const float inner = 64.0f;
+    for (unsigned i = 0; i < SPECTRUM_BAR_COUNT; i++)
+    {
+        uint8_t level = bars[i];
+        /* 官方Demo使用线性幅度，保留不同强度之间的长度差。 */
+        float length = level == 0 ? 4.0f : 6.0f + level * 0.28f;
+        float outer = inner + length;
+        float angle1 = i * step + gap;
+        float angle2 = (i + 1U) * step - gap;
+        float sin1 = sinf(angle1);
+        float cos1 = cosf(angle1);
+        float sin2 = sinf(angle2);
+        float cos2 = cosf(angle2);
+        points[0] = (lv_point_t){cx + (lv_coord_t)(sin1 * outer), cy - (lv_coord_t)(cos1 * outer)};
+        points[1] = (lv_point_t){cx + (lv_coord_t)(sin1 * inner), cy - (lv_coord_t)(cos1 * inner)};
+        points[2] = (lv_point_t){cx + (lv_coord_t)(sin2 * inner), cy - (lv_coord_t)(cos2 * inner)};
+        points[3] = (lv_point_t){cx + (lv_coord_t)(sin2 * outer), cy - (lv_coord_t)(cos2 * outer)};
+        bar.bg_color = spectrum_bar_color(i);
+        bar.bg_opa = level == 0 ? LV_OPA_20 : LV_OPA_COVER;
+        lv_draw_polygon(draw, &bar, points, 4);
+        for (unsigned point = 0; point < 4; point++) points[point].x = 2 * cx - points[point].x;
+        lv_draw_polygon(draw, &bar, points, 4);
+    }
 }
 
 static void track_play_cb(lv_event_t *event)
@@ -497,6 +617,9 @@ static void refresh_cb(lv_timer_t *timer)
     music_snapshot_t snapshot;
     music_service_snapshot(&snapshot);
     audio_spectrum_snapshot(&ui.spectrum);
+    spectrum_update_main_levels(snapshot.state == MUSIC_PLAYING);
+    /* 官方Demo让封面随低频缩放，当前图标最大放大约20%，保持在唱片中心内。 */
+    lv_img_set_zoom(ui.cover, LV_IMG_ZOOM_NONE + ui.spectrum_main[0] / 2U);
     if (snapshot.state == MUSIC_PLAYING)
     {
         ui.rotation = (ui.rotation + 8U) % 3600U;
@@ -543,8 +666,9 @@ static void refresh_cb(lv_timer_t *timer)
     }
     if (snapshot.state == MUSIC_SCANNING) lv_label_set_text(ui.track_count, "扫描中…");
     else lv_label_set_text_fmt(ui.track_count, "共 %u 首", snapshot.count);
-    const char *source = snapshot.state == MUSIC_PLAYING ? "正在播放" :
-                         snapshot.state == MUSIC_PAUSED ? "已暂停" : "本地音乐";
+    /* 与下方歌曲名使用相同的前导空格，保持文字左边沿对齐。 */
+    const char *source = snapshot.state == MUSIC_PLAYING ? " 正在播放" :
+                         snapshot.state == MUSIC_PAUSED ? " 已暂停" : " 本地音乐";
     if (strcmp(lv_label_get_text(ui.source), source) != 0) lv_label_set_text(ui.source, source);
     bool rebuilt = snapshot.state != MUSIC_SCANNING && snapshot.playlist_version != ui.list_version;
     bool has_current = snapshot.title[0] != '\0';
@@ -650,6 +774,8 @@ void ui_music_create(lv_obj_t *parent)
     ui.root = panel(parent);
     lv_obj_set_size(ui.root, lv_pct(100), lv_pct(92));
     lv_obj_set_y(ui.root, lv_pct(8));
+    lv_obj_set_style_border_width(ui.root, 0, 0);
+    lv_obj_set_style_radius(ui.root, 0, 0);
     lv_obj_set_style_bg_color(ui.root, lv_color_hex(0xF5F7FA), 0);
     lv_obj_set_style_text_font(ui.root, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_text_color(ui.root, lv_color_hex(0x243247), 0);
@@ -657,16 +783,16 @@ void ui_music_create(lv_obj_t *parent)
     lv_obj_set_style_pad_row(ui.root, 8, 0);
     lv_obj_add_event_cb(ui.root, deleted_cb, LV_EVENT_DELETE, NULL);
     lv_obj_t *header = panel(ui.root);
-    lv_obj_set_size(header, lv_pct(100), 46);
-    lv_obj_set_style_border_width(header, 0, 0);
-    lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_left(header, 18, 0);
+    lv_obj_remove_style_all(header);
+    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(header, lv_pct(100), 42);
+    lv_obj_set_style_pad_left(header, 10, 0);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(header, 16, 0);
+    lv_obj_set_style_pad_column(header, 8, 0);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *title = lv_label_create(header);
     lv_label_set_text(title, "音乐播放器");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xE91E63), 0);
+    lv_obj_set_style_text_color(title, lv_palette_main(LV_PALETTE_PINK), 0);
     ui.status = lv_label_create(header);
     lv_obj_set_width(ui.status, 0);
     lv_obj_set_flex_grow(ui.status, 1);
@@ -674,11 +800,14 @@ void ui_music_create(lv_obj_t *parent)
     lv_obj_set_style_text_color(ui.status, lv_color_hex(0xD65A6A), 0);
     lv_label_set_text(ui.status, "");
     lv_obj_t *home = lv_btn_create(header);
+    lv_obj_remove_style_all(home);
     lv_obj_set_size(home, 112, 38);
+    lv_obj_set_style_pad_all(home, 3, 0);
     lv_obj_set_style_bg_color(home, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(home, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(home, lv_color_hex(0x243247), 0);
+    lv_obj_set_style_text_font(home, &ui_font_chinese_24_4, 0);
     lv_obj_set_style_radius(home, 6, 0);
-    lv_obj_set_style_shadow_width(home, 0, 0);
     lv_obj_set_style_border_width(home, 1, 0);
     lv_obj_set_style_border_color(home, lv_color_hex(0xE4EAF1), 0);
     lv_obj_set_style_bg_color(home, lv_color_hex(0xF44336), LV_STATE_PRESSED);
@@ -710,13 +839,13 @@ void ui_music_create(lv_obj_t *parent)
     /* 唱片舞台是浮动子对象，不参与Grid分配；环形频谱只读取真实FFT快照。 */
     lv_obj_set_parent(ui.disc, stage);
     lv_obj_set_size(ui.disc, 194, 194);
-    lv_obj_align(ui.disc, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(ui.disc, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_add_event_cb(ui.disc, spectrum_draw, LV_EVENT_DRAW_MAIN_END, NULL);
     create_record(ui.disc);
     lv_obj_t *info = lv_obj_create(stage);
     lv_obj_remove_style_all(info);
     lv_obj_set_size(info, lv_pct(54), 160);
-    lv_obj_align(info, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_align(info, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(info, 10, 0);
     lv_obj_set_flex_align(info, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);

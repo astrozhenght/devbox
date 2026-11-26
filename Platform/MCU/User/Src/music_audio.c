@@ -9,6 +9,8 @@ static DMA_HandleTypeDef audio_dma;
 static MUSIC_RAM int16_t pcm_dma[MUSIC_FFT_SIZE * 4U];
 static volatile uint32_t pcm_sequence;
 static volatile uint32_t pcm_errors;
+static volatile unsigned pcm_completed_half;
+static volatile bool pcm_valid;
 static volatile bool sai_running;
 
 bool platform_music_spi_init(void)
@@ -39,8 +41,8 @@ bool platform_music_spi_init(void)
 
 void platform_music_spi_fast(void)
 {
-    /* 200MHz内核时钟/64=3.125MHz，低于36.864MHz CLKI/7的SCI读取上限。 */
-    audio_spi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64;
+    /* 200 MHz / 128 = 1.5625 MHz。为模块排线保留时序余量，仍高于音频码率。 */
+    audio_spi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
     (void)HAL_SPI_Init(&audio_spi);
 }
 
@@ -88,32 +90,53 @@ bool platform_music_sai_start(void)
     __HAL_LINKDMA(&audio_sai, hdmarx, audio_dma);
     HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, PLATFORM_IRQ_AUDIO_PREEMPT_PRIORITY,
                          PLATFORM_IRQ_AUDIO_SUB_PRIORITY);
-    HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
     HAL_NVIC_SetPriority(SAI1_IRQn, PLATFORM_IRQ_AUDIO_PREEMPT_PRIORITY,
                          PLATFORM_IRQ_AUDIO_SUB_PRIORITY);
-    HAL_NVIC_EnableIRQ(SAI1_IRQn);
-    pcm_sequence = 0;
+    HAL_NVIC_ClearPendingIRQ(DMA2_Stream0_IRQn);
+    HAL_NVIC_ClearPendingIRQ(SAI1_IRQn);
+    pcm_valid = false;
     pcm_errors = 0;
     sai_running = HAL_SAI_Receive_DMA(&audio_sai, (uint8_t *)pcm_dma,
                                      MUSIC_FFT_SIZE * 4U) == HAL_OK;
+    if (!sai_running)
+    {
+        (void)HAL_SAI_DMAStop(&audio_sai);
+        return false;
+    }
+    HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+    HAL_NVIC_EnableIRQ(SAI1_IRQn);
     return sai_running;
 }
 
 void platform_music_sai_stop(void)
 {
-    if (sai_running) (void)HAL_SAI_DMAStop(&audio_sai);
+    if (!sai_running) return;
     sai_running = false;
+    pcm_valid = false;
+    HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+    HAL_NVIC_DisableIRQ(SAI1_IRQn);
+    audio_sai.Instance->IMR = 0;
+    if (HAL_SAI_DMAStop(&audio_sai) != HAL_OK) pcm_errors++;
 }
 
 void platform_music_dma_irq(void) { HAL_DMA_IRQHandler(&audio_dma); }
 void platform_music_sai_irq(void) { HAL_SAI_IRQHandler(&audio_sai); }
+static void pcm_complete(unsigned half)
+{
+    if (!sai_running) return;
+    pcm_completed_half = half;
+    __DMB();
+    pcm_sequence++;
+    pcm_valid = true;
+}
+
 void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *sai)
 {
-    if (sai == &audio_sai) { __DMB(); pcm_sequence++; }
+    if (sai == &audio_sai) pcm_complete(0);
 }
 void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *sai)
 {
-    if (sai == &audio_sai) { __DMB(); pcm_sequence++; }
+    if (sai == &audio_sai) pcm_complete(1);
 }
 void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *sai)
 {
@@ -123,13 +146,17 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *sai)
 bool platform_music_pcm_copy(int16_t *stereo, uint32_t *sequence)
 {
     uint32_t before = pcm_sequence;
-    if (!sai_running || before == 0 || before == *sequence) return false;
-    /* 完成奇数次时前半块稳定，偶数次时后半块稳定。DMA不可写入DTCM。 */
-    uint32_t offset = (before & 1U) ? 0U : MUSIC_FFT_SIZE * 2U;
+    if (!sai_running || !pcm_valid || pcm_errors != 0 || before == *sequence) return false;
+    /* 记录具体完成的半区，序号在换曲或暂停重启 DMA 时仍连续。 */
+    unsigned half = pcm_completed_half;
+    unsigned samples = MUSIC_FFT_SIZE * 2U;
     __DMB();
-    memcpy(stereo, pcm_dma + offset, MUSIC_FFT_SIZE * 2U * sizeof(int16_t));
+    memcpy(stereo, pcm_dma + half * samples, samples * sizeof(int16_t));
     __DMB();
-    if (before != pcm_sequence) return false; /* 复制时被DMA追上则整块丢弃。 */
+    /* 除回调序号外还检查 DMA 位置，覆盖事件未进入中断时也丢弃该块。 */
+    uint32_t remaining = __HAL_DMA_GET_COUNTER(&audio_dma);
+    if (!sai_running || !pcm_valid || pcm_errors != 0 || before != pcm_sequence ||
+        remaining == 0 || (half == 0 ? remaining > samples : remaining <= samples)) return false;
     *sequence = before;
     return true;
 }

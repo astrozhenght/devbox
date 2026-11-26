@@ -1,9 +1,13 @@
 #ifndef MUSIC_CONFIG_H
 #define MUSIC_CONFIG_H
 
-/* 模块接线已确认，允许初始化VS1053B和SAI采样。 */
+/* VS1053B 播放接口接线已确认。 */
 #ifndef MUSIC_HARDWARE_CONFIRMED
 #define MUSIC_HARDWARE_CONFIRMED 1
+#endif
+/* 从 VS1053 的 I²S 输出采集频谱，耳机仍由芯片内部 DAC 驱动。 */
+#ifndef MUSIC_SPECTRUM_CAPTURE
+#define MUSIC_SPECTRUM_CAPTURE 1
 #endif
 #define MUSIC_DIRECTORY "SD:/Music"
 #define MUSIC_MAX_TRACKS 32U

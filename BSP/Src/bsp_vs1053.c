@@ -5,6 +5,9 @@
 #include "task.h"
 #include <string.h>
 
+#define VS1053_SM_SDINEW   0x0800U
+#define VS1053_SM_SDISHARE 0x0400U
+
 /**
  * bsp_vs1053_ready() - 采样解码器的 DREQ 就绪引脚
  *
@@ -50,6 +53,7 @@ static bool sci(uint8_t reg, uint16_t *value, bool write)
 }
 
 static bool write_reg(uint8_t reg, uint16_t value) { return sci(reg, &value, true); }
+
 static bool write_memory(uint16_t address, uint16_t value)
 {
     return write_reg(7, address) && write_reg(6, value);
@@ -100,7 +104,8 @@ bool bsp_vs1053_volume(uint8_t percent)
  */
 bool bsp_vs1053_i2s_enable(void)
 {
-    return write_memory(0xC017U, 0x00F0U) && write_memory(0xC040U, 0x000CU);
+    /* 48 kHz I²S。SAI 从机只接收位时钟、帧时钟和数据，无需 MCLK。 */
+    return write_memory(0xC017U, 0x00F0U) && write_memory(0xC040U, 0x0004U);
 }
 
 /**
@@ -141,16 +146,18 @@ bool bsp_vs1053_init(void)
     if (!write_reg(0, 0x0804U)) return false;
     vTaskDelay(pdMS_TO_TICKS(2)); /* 软复位最长需要22000个XTALI周期。 */
     uint16_t mode = 0;
-    if (!sci(0, &mode, false) || mode != 0x0800U) return false;
-    /* 12.288MHz晶振、3倍CLKI；使用芯片自身的DAC输出到耳机。 */
-    if (!write_reg(0, 0x0800U) || !write_reg(3, 0x6000U) ||
+    if (!sci(0, &mode, false) || mode != VS1053_SM_SDINEW) return false;
+    /* SPI2 由解码器独占。XCS 低电平选 SCI，高电平时钟送入 SDI。 */
+    const uint16_t playback_mode = VS1053_SM_SDINEW | VS1053_SM_SDISHARE;
+    if (!write_reg(0, playback_mode) || !sci(0, &mode, false) ||
+        mode != playback_mode || !write_reg(3, 0x6000U) ||
         !bsp_vs1053_volume(50)) return false;
     platform_music_spi_fast();
     return true;
 }
 
 /**
- * bsp_vs1053_send() - 通过 XDCS 向解码器发送一块音频数据
+ * bsp_vs1053_send() - 在 XCS 保持高电平时向共享片选的 SDI 发送音频数据
  * @data: 非空源缓冲区，至少包含 @size 字节
  * @size: 本次传输字节数，范围为 1 到 32
  *
@@ -163,10 +170,7 @@ bool bsp_vs1053_send(const uint8_t *data, uint16_t size)
     uint8_t rx[32];
     if (size == 0 || size > 32 || !bsp_vs1053_ready()) return false;
     memcpy(tx, data, size);
-    HAL_GPIO_WritePin(MUSIC_DCS_PORT, MUSIC_DCS_PIN, GPIO_PIN_RESET);
-    bool ok = platform_music_spi_transfer(tx, rx, size);
-    HAL_GPIO_WritePin(MUSIC_DCS_PORT, MUSIC_DCS_PIN, GPIO_PIN_SET);
-    return ok;
+    return platform_music_spi_transfer(tx, rx, size);
 }
 
 /**
