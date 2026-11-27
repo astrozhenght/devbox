@@ -9,12 +9,22 @@
 #define SPECTRUM_BAR_COUNT 16U
 #define SPECTRUM_MAIN_BANDS 4U
 #define SPECTRUM_COLOR_COUNT 5U
+#define MUSIC_LIST_PAGE_SIZE 16U
+
+typedef enum
+{
+    SPECTRUM_VIEW_RING,
+    SPECTRUM_VIEW_BARS,
+    SPECTRUM_VIEW_WAVE,
+    SPECTRUM_VIEW_COUNT
+} spectrum_view_t;
 
 /* 视觉参考LVGL music demo：唱片、镜像环形频谱和曲目列表；数据均来自真实服务。 */
 typedef struct
 {
     lv_obj_t *root;
     lv_obj_t *disc;
+    lv_obj_t *record;
     lv_obj_t *cover;
     lv_obj_t *title;
     lv_obj_t *status;
@@ -22,6 +32,9 @@ typedef struct
     lv_obj_t *duration;
     lv_obj_t *list;
     lv_obj_t *list_empty;
+    lv_obj_t *list_previous;
+    lv_obj_t *list_next;
+    lv_obj_t *list_page_text;
     lv_obj_t *play_text;
     lv_obj_t *mode_icon;
     lv_obj_t *mode_overlay;
@@ -32,6 +45,7 @@ typedef struct
     lv_obj_t *volume_overlay;
     lv_obj_t *track_count;
     lv_obj_t *source;
+    lv_obj_t *spectrum_view_text;
     lv_obj_t *progress;
     lv_timer_t *timer;
     uint32_t list_version;
@@ -39,6 +53,8 @@ typedef struct
     uint32_t drag_duration;
     uint16_t rotation;
     uint16_t list_track;
+    uint16_t list_page;
+    uint16_t rendered_page;
     music_state_t list_state;
     bool list_has_current;
     uint8_t mode;
@@ -49,6 +65,7 @@ typedef struct
     uint8_t spectrum_previous[SPECTRUM_MAIN_BANDS];
     uint32_t spectrum_lane;
     uint32_t spectrum_lane_target;
+    uint8_t spectrum_view;
     bool spectrum_initialized;
 } music_ui_t;
 static music_ui_t ui;
@@ -456,6 +473,77 @@ static lv_color_t spectrum_bar_color(unsigned index)
     return lv_color_hex(palette[color]);
 }
 
+/* 柱状模式复用环形频谱的 16 个可视化值，不增加 FFT 计算。 */
+static void spectrum_draw_columns(lv_draw_ctx_t *draw, const lv_area_t *area,
+                                  const uint8_t bars[SPECTRUM_BAR_COUNT])
+{
+    const lv_coord_t side = 12;
+    const lv_coord_t bottom = 12;
+    const lv_coord_t gap = 4;
+    lv_coord_t content_width = lv_area_get_width(area) - side * 2;
+    lv_coord_t bar_width = (content_width - gap * (SPECTRUM_BAR_COUNT - 1U)) /
+                           SPECTRUM_BAR_COUNT;
+    lv_coord_t used_width = bar_width * SPECTRUM_BAR_COUNT +
+                            gap * (SPECTRUM_BAR_COUNT - 1U);
+    lv_coord_t x = area->x1 + side + (content_width - used_width) / 2;
+    lv_coord_t baseline = area->y2 - bottom;
+    lv_draw_rect_dsc_t column;
+    lv_draw_rect_dsc_init(&column);
+    column.radius = LV_RADIUS_CIRCLE;
+    for (unsigned i = 0; i < SPECTRUM_BAR_COUNT; i++)
+    {
+        lv_coord_t height = bars[i] == 0U ? 4 : 6 + (lv_coord_t)bars[i] * 140 / 100;
+        lv_area_t coords = {x, baseline - height + 1, x + bar_width - 1, baseline};
+        column.bg_color = spectrum_bar_color(i);
+        column.bg_opa = bars[i] == 0U ? LV_OPA_20 : LV_OPA_COVER;
+        lv_draw_rect(draw, &column, &coords);
+        x += bar_width + gap;
+    }
+}
+
+/* 波形模式将频谱包络映射到连续曲线，仍只消费现有的 16 个可视化值。 */
+static void spectrum_draw_wave(lv_draw_ctx_t *draw, const lv_area_t *area,
+                               const uint8_t bars[SPECTRUM_BAR_COUNT])
+{
+    const unsigned point_count = SPECTRUM_BAR_COUNT * 4U;
+    const lv_coord_t side = 12;
+    lv_coord_t width = lv_area_get_width(area) - side * 2;
+    lv_coord_t center = (area->y1 + area->y2) / 2;
+    float phase = (float)(ui.spectrum_lane & 1023U) * 6.28318530718f / 1024.0f;
+    lv_point_t previous = {area->x1 + side, center};
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.width = 3;
+    line.round_start = 1;
+    line.round_end = 1;
+    for (unsigned i = 0; i < point_count; i++)
+    {
+        float position = (float)i * (SPECTRUM_BAR_COUNT - 1U) / (point_count - 1U);
+        unsigned envelope = (unsigned)position;
+        unsigned next = envelope + 1U < SPECTRUM_BAR_COUNT ? envelope + 1U : envelope;
+        float fraction = position - envelope;
+        /* smoothstep 让相邻频带的振幅和斜率连续，避免折线出现尖角。 */
+        float blend = fraction * fraction * (3.0f - 2.0f * fraction);
+        float level = bars[envelope] + (bars[next] - bars[envelope]) * blend;
+        float amplitude = 4.0f + level * 0.68f;
+        float angle = phase + (float)i * 25.1327412287f / (point_count - 1U);
+        float sample = sinf(angle) * amplitude;
+        lv_point_t point =
+        {
+            area->x1 + side + (lv_coord_t)(i * width / (point_count - 1U)),
+            center + (lv_coord_t)sample
+        };
+        if (i > 0U)
+        {
+            unsigned color_index = (i - 1U) * SPECTRUM_BAR_COUNT / (point_count - 1U);
+            line.color = spectrum_bar_color(color_index);
+            line.opa = level < 1.0f ? LV_OPA_40 : LV_OPA_COVER;
+            lv_draw_line(draw, &line, &previous, &point);
+        }
+        previous = point;
+    }
+}
+
 static void spectrum_draw(lv_event_t *event)
 {
     lv_obj_t *obj = lv_event_get_target(event);
@@ -466,6 +554,16 @@ static void spectrum_draw(lv_event_t *event)
     int cy = (area.y1 + area.y2) / 2;
     uint8_t bars[SPECTRUM_BAR_COUNT];
     spectrum_visual_levels(bars);
+    if (ui.spectrum_view == SPECTRUM_VIEW_BARS)
+    {
+        spectrum_draw_columns(draw, &area, bars);
+        return;
+    }
+    if (ui.spectrum_view == SPECTRUM_VIEW_WAVE)
+    {
+        spectrum_draw_wave(draw, &area, bars);
+        return;
+    }
     lv_draw_rect_dsc_t bar;
     lv_draw_rect_dsc_init(&bar);
     lv_point_t points[4];
@@ -494,6 +592,18 @@ static void spectrum_draw(lv_event_t *event)
         for (unsigned point = 0; point < 4; point++) points[point].x = 2 * cx - points[point].x;
         lv_draw_polygon(draw, &bar, points, 4);
     }
+}
+
+static void spectrum_view_cb(lv_event_t *event)
+{
+    (void)event;
+    ui.spectrum_view = (ui.spectrum_view + 1U) % SPECTRUM_VIEW_COUNT;
+    bool ring = ui.spectrum_view == SPECTRUM_VIEW_RING;
+    static const char *labels[SPECTRUM_VIEW_COUNT] = {"环形频谱", "柱状频谱", "波形频谱"};
+    lv_label_set_text(ui.spectrum_view_text, labels[ui.spectrum_view]);
+    if (ring) lv_obj_clear_flag(ui.record, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui.record, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(ui.disc);
 }
 
 static void track_play_cb(lv_event_t *event)
@@ -559,6 +669,42 @@ static void track_row_create(unsigned track, char *name)
     lv_obj_set_style_text_font(detail, &ui_font_chinese_20, 0);
     lv_obj_set_style_text_color(detail, lv_color_hex(0x69788B), 0);
     lv_label_set_text(detail, format);
+}
+
+static unsigned list_page_count(unsigned track_count)
+{
+    return (track_count + MUSIC_LIST_PAGE_SIZE - 1U) / MUSIC_LIST_PAGE_SIZE;
+}
+
+static void list_page_cb(lv_event_t *event)
+{
+    bool next = (bool)(uintptr_t)lv_event_get_user_data(event);
+    music_snapshot_t snapshot;
+    music_service_snapshot(&snapshot);
+    unsigned pages = list_page_count(snapshot.count);
+    if (next && ui.list_page + 1U < pages) ui.list_page++;
+    else if (!next && ui.list_page > 0U) ui.list_page--;
+    else return;
+    ui.rendered_page = UINT16_MAX;
+}
+
+static lv_obj_t *list_page_button(lv_obj_t *parent, const char *symbol, bool next)
+{
+    lv_obj_t *obj = lv_btn_create(parent);
+    lv_obj_set_size(obj, 30, 26);
+    lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_width(obj, 0, 0);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(0xF3F7FD), 0);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(0x2196F3), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(obj, lv_color_hex(0x3C5875), 0);
+    lv_obj_set_style_text_color(obj, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_40, LV_STATE_DISABLED);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_add_event_cb(obj, list_page_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)next);
+    lv_obj_t *label = lv_label_create(obj);
+    lv_label_set_text(label, symbol);
+    lv_obj_center(label);
+    return obj;
 }
 
 /* 仅在有可定位文件且滑条能表示有效目标秒数时允许拖动。 */
@@ -670,22 +816,37 @@ static void refresh_cb(lv_timer_t *timer)
     const char *source = snapshot.state == MUSIC_PLAYING ? " 正在播放" :
                          snapshot.state == MUSIC_PAUSED ? " 已暂停" : " 本地音乐";
     if (strcmp(lv_label_get_text(ui.source), source) != 0) lv_label_set_text(ui.source, source);
-    bool rebuilt = snapshot.state != MUSIC_SCANNING && snapshot.playlist_version != ui.list_version;
     bool has_current = snapshot.title[0] != '\0';
     bool track_changed = has_current && (!ui.list_has_current || ui.list_track != snapshot.track);
+    bool version_changed = snapshot.playlist_version != ui.list_version;
     bool follow_track = track_changed && !lv_obj_is_scrolling(ui.list);
+    unsigned pages = list_page_count(snapshot.count);
+    if (version_changed) ui.list_page = 0;
+    if (follow_track) ui.list_page = snapshot.track / MUSIC_LIST_PAGE_SIZE;
+    if (pages == 0U) ui.list_page = 0;
+    else if (ui.list_page >= pages) ui.list_page = pages - 1U;
+    lv_label_set_text_fmt(ui.list_page_text, "%u/%u", pages ? ui.list_page + 1U : 0U, pages);
+    if (ui.list_page == 0U) lv_obj_add_state(ui.list_previous, LV_STATE_DISABLED);
+    else lv_obj_clear_state(ui.list_previous, LV_STATE_DISABLED);
+    if (pages == 0U || ui.list_page + 1U >= pages) lv_obj_add_state(ui.list_next, LV_STATE_DISABLED);
+    else lv_obj_clear_state(ui.list_next, LV_STATE_DISABLED);
+    bool rebuilt = snapshot.state != MUSIC_SCANNING &&
+                   (version_changed || ui.list_page != ui.rendered_page);
     if (rebuilt)
     {
-        lv_coord_t scroll_y = lv_obj_get_scroll_y(ui.list);
         lv_obj_clean(ui.list);
-        for (unsigned i = 0; i < snapshot.count; i++)
+        unsigned first = ui.list_page * MUSIC_LIST_PAGE_SIZE;
+        unsigned end = first + MUSIC_LIST_PAGE_SIZE;
+        if (end > snapshot.count) end = snapshot.count;
+        for (unsigned i = first; i < end; i++)
         {
             char name[MUSIC_NAME_CAP];
             if (!music_service_track_name(i, name, sizeof(name))) continue;
             track_row_create(i, name);
         }
         ui.list_version = snapshot.playlist_version;
-        lv_obj_scroll_to_y(ui.list, scroll_y, LV_ANIM_OFF);
+        ui.rendered_page = ui.list_page;
+        lv_obj_scroll_to_y(ui.list, 0, LV_ANIM_OFF);
     }
     if (rebuilt || track_changed || ui.list_has_current != has_current || ui.list_state != snapshot.state)
     {
@@ -736,8 +897,8 @@ static void refresh_cb(lv_timer_t *timer)
     else lv_obj_add_flag(ui.list_empty, LV_OBJ_FLAG_HIDDEN);
 }
 
-/* 以原生圆形对象绘制默认唱片，避免放大48px启动图标作为整张封面。 */
-static void create_record(lv_obj_t *parent)
+/* 以原生圆形对象绘制默认唱片，返回对象供频谱模式切换显隐。 */
+static lv_obj_t *create_record(lv_obj_t *parent)
 {
     lv_obj_t *record = panel(parent);
     lv_obj_set_size(record, 132, 132);
@@ -766,6 +927,7 @@ static void create_record(lv_obj_t *parent)
     ui.cover = lv_img_create(center);
     lv_img_set_src(ui.cover, &ui_img_icon_music);
     lv_obj_center(ui.cover);
+    return record;
 }
 
 void ui_music_create(lv_obj_t *parent)
@@ -841,7 +1003,7 @@ void ui_music_create(lv_obj_t *parent)
     lv_obj_set_size(ui.disc, 194, 194);
     lv_obj_align(ui.disc, LV_ALIGN_LEFT_MID, 8, 0);
     lv_obj_add_event_cb(ui.disc, spectrum_draw, LV_EVENT_DRAW_MAIN_END, NULL);
-    create_record(ui.disc);
+    ui.record = create_record(ui.disc);
     lv_obj_t *info = lv_obj_create(stage);
     lv_obj_remove_style_all(info);
     lv_obj_set_size(info, lv_pct(54), 160);
@@ -857,14 +1019,36 @@ void ui_music_create(lv_obj_t *parent)
     lv_label_set_long_mode(ui.title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(ui.title, " ");
     lv_obj_set_style_text_color(ui.title, lv_color_hex(0x243247), 0);
+    lv_obj_t *spectrum_view = lv_btn_create(stage);
+    lv_obj_remove_style_all(spectrum_view);
+    lv_obj_set_size(spectrum_view, 112, 32);
+    lv_obj_align(spectrum_view, LV_ALIGN_TOP_RIGHT, -12, 12);
+    lv_obj_set_style_radius(spectrum_view, 8, 0);
+    lv_obj_set_style_bg_opa(spectrum_view, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(spectrum_view, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(spectrum_view, lv_color_hex(0x2196F3), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(spectrum_view, 1, 0);
+    lv_obj_set_style_border_color(spectrum_view, lv_color_hex(0xD7E3F0), 0);
+    lv_obj_set_style_text_color(spectrum_view, lv_color_hex(0x2767B2), 0);
+    lv_obj_set_style_text_color(spectrum_view, lv_color_white(), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(spectrum_view, spectrum_view_cb, LV_EVENT_CLICKED, NULL);
+    ui.spectrum_view_text = lv_label_create(spectrum_view);
+    lv_label_set_text(ui.spectrum_view_text, "环形频谱");
+    lv_obj_center(ui.spectrum_view_text);
     lv_obj_t *controls = lv_obj_create(player);
     lv_obj_remove_style_all(controls);
     lv_obj_set_grid_cell(controls, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 1, 1);
     lv_obj_set_style_bg_opa(controls, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(controls, lv_color_hex(0xF3F7FD), 0);
+    lv_obj_set_style_bg_color(controls, lv_color_hex(0xE8F2FF), 0);
+    lv_obj_set_style_bg_grad_color(controls, lv_color_hex(0xF8FBFF), 0);
+    lv_obj_set_style_bg_grad_dir(controls, LV_GRAD_DIR_HOR, 0);
     lv_obj_set_style_radius(controls, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(controls, 1, 0);
-    lv_obj_set_style_border_color(controls, lv_color_hex(0xE7EDF5), 0);
+    lv_obj_set_style_border_color(controls, lv_color_hex(0xC8DCF3), 0);
+    lv_obj_set_style_shadow_color(controls, lv_color_hex(0x7FA6CF), 0);
+    lv_obj_set_style_shadow_width(controls, 8, 0);
+    lv_obj_set_style_shadow_opa(controls, LV_OPA_20, 0);
+    lv_obj_set_style_shadow_ofs_y(controls, 2, 0);
     lv_obj_set_style_pad_hor(controls, 8, 0);
     lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -964,11 +1148,24 @@ void ui_music_create(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(ui.list, LV_OPA_60, LV_PART_SCROLLBAR);
     lv_obj_set_style_border_width(ui.list, 0, LV_PART_SCROLLBAR);
     lv_obj_set_scrollbar_mode(ui.list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_t *pager = lv_obj_create(right);
+    lv_obj_remove_style_all(pager);
+    lv_obj_set_size(pager, lv_pct(100), 28);
+    lv_obj_set_flex_flow(pager, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(pager, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(pager, 10, 0);
+    ui.list_previous = list_page_button(pager, LV_SYMBOL_LEFT, false);
+    ui.list_page_text = lv_label_create(pager);
+    lv_obj_set_width(ui.list_page_text, 48);
+    lv_obj_set_style_text_align(ui.list_page_text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(ui.list_page_text, lv_color_hex(0x69788B), 0);
+    ui.list_next = list_page_button(pager, LV_SYMBOL_RIGHT, true);
     ui.list_empty = lv_label_create(right);
     lv_obj_add_flag(ui.list_empty, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_color(ui.list_empty, lv_color_hex(0x69788B), 0);
     lv_obj_center(ui.list_empty);
     ui.list_version = UINT32_MAX;
+    ui.rendered_page = UINT16_MAX;
     ui.timer = lv_timer_create(refresh_cb, 33, NULL);
     music_snapshot_t snapshot;
     music_service_snapshot(&snapshot);

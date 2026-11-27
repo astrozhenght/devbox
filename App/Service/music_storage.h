@@ -6,10 +6,12 @@ typedef enum
 {
     MUSIC_STORAGE_SCAN, MUSIC_STORAGE_OPEN, MUSIC_STORAGE_READ, MUSIC_STORAGE_CLOSE, MUSIC_STORAGE_SEEK
 } music_storage_op_t;
+/* 目录固定为 MUSIC_DIRECTORY，完整路径无需为每首歌保留 512 字节。 */
+#define MUSIC_TRACK_PATH_CAP (sizeof(MUSIC_DIRECTORY) + MUSIC_NAME_CAP)
 typedef struct
 {
     char name[MUSIC_NAME_CAP];
-    char path[FILE_SERVICE_PATH_CAP];
+    char path[MUSIC_TRACK_PATH_CAP];
 } music_track_t;
 typedef struct
 {
